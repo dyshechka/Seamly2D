@@ -114,6 +114,11 @@ QT_WARNING_POP
 // We need this enum in case we will add or delete a column. And also make code more readable.
 enum {ColumnName = 0, ColumnNumber, ColumnFullName, ColumnCalcValue, ColumnFormula, ColumnBaseValue, ColumnInSizes, ColumnInHeights, ColumnDescription};
 
+// Keeps the Formula column narrow enough that a long, complex formula wraps
+// onto multiple lines instead of stretching the column to fit one very long
+// line (see initializeTable() and RefreshTable()).
+static const int maxFormulaColumnWidth = 260;
+
 //---------------------------------------------------------------------------------------------------------------------
 TMainWindow::TMainWindow(QWidget *parent)
 	: VAbstractMainWindow(parent),
@@ -2574,6 +2579,14 @@ void TMainWindow::initializeTable()
 	ShowUnits();
 
 	ui->tableWidget->resizeColumnsToContents();
+	// Cap the Formula column's width so a long, complex formula wraps onto
+	// multiple lines (matching the multi-line editing already supported in
+	// the dedicated Formula field below) instead of stretching the column
+	// to fit one very long, hard-to-read line.
+	if (ui->tableWidget->columnWidth(ColumnFormula) > maxFormulaColumnWidth)
+	{
+		ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
+	}
 	ui->tableWidget->resizeRowsToContents();
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
 }
@@ -2884,6 +2897,14 @@ void TMainWindow::RefreshTable(bool freshCall)
 	if (freshCall)
 	{
 		ui->tableWidget->resizeColumnsToContents();
+		// Cap the Formula column's width so a long, complex formula wraps onto
+		// multiple lines (matching the multi-line editing already supported in
+		// the dedicated Formula field below) instead of stretching the column
+		// to fit one very long, hard-to-read line.
+		if (ui->tableWidget->columnWidth(ColumnFormula) > maxFormulaColumnWidth)
+		{
+			ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
+		}
 		ui->tableWidget->resizeRowsToContents();
 	}
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
