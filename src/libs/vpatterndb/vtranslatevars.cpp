@@ -925,6 +925,11 @@ QString VTranslateVars::FormulaFromUser(const QString &formula, bool osSeparator
             }
 
             loc = QLocale::c();// To internal locale
+            // Formulas must never contain a thousands (group) separator -- it isn't
+            // whitespace the formula parser skips, so a number like "1 234" (with the
+            // locale's group separator) breaks evaluation. Only the decimal point
+            // matters here, so grouping is explicitly omitted.
+            loc.setNumberOptions(loc.numberOptions() | QLocale::OmitGroupSeparator);
             const QString dStr = loc.toString(d);// Internal look for number
             newFormula.replace(nKeys.at(i), nValues.at(i).length(), dStr);
             const int bias = nValues.at(i).length() - dStr.length();
@@ -1066,6 +1071,10 @@ QString VTranslateVars::FormulaToUser(const QString &formula, bool osSeparator) 
             }
 
             loc = QLocale();// To user locale
+            // Same reasoning as in FormulaFromUser(): never introduce a thousands
+            // separator into a formula, since it isn't parseable as part of the
+            // number and would break further calculations.
+            loc.setNumberOptions(loc.numberOptions() | QLocale::OmitGroupSeparator);
             QString dStr = loc.toString(d);// Number string in user locale
             newFormula.replace(nKeys.at(i), nValues.at(i).length(), dStr);
             const int bias = nValues.at(i).length() - dStr.length();

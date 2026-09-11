@@ -114,6 +114,11 @@ QT_WARNING_POP
 // We need this enum in case we will add or delete a column. And also make code more readable.
 enum {ColumnName = 0, ColumnNumber, ColumnFullName, ColumnCalcValue, ColumnFormula, ColumnBaseValue, ColumnInSizes, ColumnInHeights, ColumnDescription};
 
+// Keeps the Formula column narrow enough that a long, complex formula wraps
+// onto multiple lines instead of stretching the column to fit one very long
+// line (see initializeTable() and RefreshTable()).
+static const int maxFormulaColumnWidth = 260;
+
 //---------------------------------------------------------------------------------------------------------------------
 TMainWindow::TMainWindow(QWidget *parent)
 	: VAbstractMainWindow(parent),
@@ -1974,9 +1979,12 @@ void TMainWindow::SaveMValue()
 
 	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
 
-	// Replace line return character with spaces for calc if exist
+	// Keep line breaks as typed -- they are stored as-is (the parser treats them as
+	// insignificant whitespace, same as a space, and EvalFormula() below still
+	// flattens its own working copy before evaluating) so the formula keeps its
+	// multi-line formatting the next time this measurement is selected, instead of
+	// collapsing back to one line.
 	QString text = ui->plainTextEditFormula->toPlainText();
-	text.replace("\n", " ");
 
 	QTableWidgetItem *formulaField = ui->tableWidget->item(row, ColumnFormula);
 	if (formulaField->text() == text)
@@ -2267,7 +2275,6 @@ void TMainWindow::SetupMenu()
 	actionDockDiagram = ui->dockWidgetDiagram->toggleViewAction();
 	actionDockDiagram->setMenuRole(QAction::NoRole);
 	ui->measurements_Menu->addAction(actionDockDiagram);
-	ui->mainToolBar->addAction(actionDockDiagram);
 	actionDockDiagram->setEnabled(false);
 	actionDockDiagram->setIcon(QIcon("://seamlymeicon/24x24/mannequin.png"));
 
@@ -2574,6 +2581,14 @@ void TMainWindow::initializeTable()
 	ShowUnits();
 
 	ui->tableWidget->resizeColumnsToContents();
+	// Cap the Formula column's width so a long, complex formula wraps onto
+	// multiple lines (matching the multi-line editing already supported in
+	// the dedicated Formula field below) instead of stretching the column
+	// to fit one very long, hard-to-read line.
+	if (ui->tableWidget->columnWidth(ColumnFormula) > maxFormulaColumnWidth)
+	{
+		ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
+	}
 	ui->tableWidget->resizeRowsToContents();
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
 }
@@ -2884,6 +2899,14 @@ void TMainWindow::RefreshTable(bool freshCall)
 	if (freshCall)
 	{
 		ui->tableWidget->resizeColumnsToContents();
+		// Cap the Formula column's width so a long, complex formula wraps onto
+		// multiple lines (matching the multi-line editing already supported in
+		// the dedicated Formula field below) instead of stretching the column
+		// to fit one very long, hard-to-read line.
+		if (ui->tableWidget->columnWidth(ColumnFormula) > maxFormulaColumnWidth)
+		{
+			ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
+		}
 		ui->tableWidget->resizeRowsToContents();
 	}
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
