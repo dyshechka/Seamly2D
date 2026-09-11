@@ -128,14 +128,19 @@ through the `computer_app_*` (background control, preferred) and
   the project to build on this Apple Silicon Mac. Check `git status`/`git
   diff` before committing, and ask if you're not sure whether a modified
   file belongs in your commit — don't silently include or drop one.
-- `git push` to `origin` from `device_bash` can fail with `403 from proxy
-  after CONNECT` — that's this VM's network egress blocking github.com, not
-  a credentials problem, and it isn't always fixable from here. If it
-  fails: say so plainly, and either ask Марта to push from her own Mac
-  (Finder → open the repo folder → she'd need someone technical, or you can
-  try driving Qt Creator's own VCS/Git menu instead, since Qt Creator runs
-  on the Mac itself rather than the sandboxed VM and may have normal
-  network access).
+- `git push` to `origin` from `device_bash` routinely fails with `403 from
+  proxy after CONNECT` — that's this VM's network egress blocking
+  github.com, not a credentials problem, and it isn't fixable from
+  `device_bash` itself. **Workaround that's confirmed to work: GitHub
+  Desktop is installed on this Mac and already has this repo open.**
+  Request access to `"GitHub Desktop"` (bundle id
+  `com.github.GitHubClient`), request full-screen control (its branch
+  publish button is a background-refused control), and click "Publish
+  branch" — it picks up whatever branch is currently checked out via
+  `device_bash`/git and pushes over the Mac's own network, which works
+  where the sandboxed VM's doesn't. Release full-screen control again when
+  done. Qt Creator's own VCS/Git menu is an alternative if GitHub Desktop
+  is ever unavailable.
 - A stale `.git/index.lock` can turn up (e.g. from Qt Creator's own
   background git polling). If git commands warn about it and there's no
   real git process running, remove it: `rm -f .git/index.lock`. If
