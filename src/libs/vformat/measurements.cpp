@@ -77,6 +77,7 @@
 #include "../vpatterndb/variables/measurement_variable.h"
 #include "../vpatterndb/vcontainer.h"
 #include "../vpatterndb/measurements_def.h"
+#include "../vpatterndb/knit_measurements.h"
 #include "../vpatterndb/pmsystems.h"
 #include "../vmisc/projectversion.h"
 
@@ -714,7 +715,7 @@ QStringList MeasurementDoc::listKnown() const
 //---------------------------------------------------------------------------------------------------------------------
 bool MeasurementDoc::eachKnownNameIsValid() const
 {
-    QStringList names = AllGroupNames();
+    QStringList names = AllGroupNames() + AllKnitGroupNames();
 
     QSet<QString> set;
     foreach (const QString &var, names)

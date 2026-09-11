@@ -158,6 +158,8 @@ private:
     void InitGroupP(); // Historical & Specialty
     void InitGroupQ(); // Patternmaking measurements
 
+    void InitKnitMeasurements(); // Марта's knitting-measurement dictionary (knit_measurements.h)
+
     void InitMeasurements();
 
     void InitMeasurement(const QString &name, const qmu::QmuTranslation &m, const qmu::QmuTranslation &g,
