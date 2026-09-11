@@ -187,15 +187,43 @@ qreal QmuParser::Abs(qreal v)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-qreal QmuParser::Rint(qreal v)
-{
-    return qFloor(v + 0.5);
-}
-
-//---------------------------------------------------------------------------------------------------------------------
 qreal QmuParser::Sign(qreal v)
 {
     return ((v<0) ? -1 : (v>0) ? 1 : 0);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Round up (towards positive infinity) to the nearest odd integer.
+ *
+ * Unlike a plain ceiling, this never returns an even integer: if the ceiling of the value is
+ * even, the result is bumped up by one more so it always lands on an odd number.
+ */
+qreal QmuParser::Odd(qreal v)
+{
+    qreal result = qCeil(v);
+    if (fmod(result, 2.0) == 0.0)
+    {
+        result += 1.0;
+    }
+    return result;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Round up (towards positive infinity) to the nearest even integer.
+ *
+ * Unlike a plain ceiling, this never returns an odd integer: if the ceiling of the value is
+ * odd, the result is bumped up by one more so it always lands on an even number.
+ */
+qreal QmuParser::Even(qreal v)
+{
+    qreal result = qCeil(v);
+    if (fmod(result, 2.0) != 0.0)
+    {
+        result += 1.0;
+    }
+    return result;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -286,6 +314,30 @@ qreal QmuParser::Max(const qreal *a_afArg, int a_iArgc)
         fRes = qMax(fRes, a_afArg[i]);
     }
     return fRes;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Callback for rounding to the nearest integer, or to a given number of decimal places.
+ * @param [in] a_afArg Vector with the function arguments: the number to round (required) and,
+ * optionally, the number of decimal places to round it to.
+ * @param [in] a_iArgc The size of a_afArg (1 or 2).
+ */
+qreal QmuParser::Rint(const qreal *a_afArg, int a_iArgc)
+{
+    if (a_iArgc == 1)
+    {
+        return qFloor(a_afArg[0] + 0.5);
+    }
+
+    if (a_iArgc == 2)
+    {
+        const qreal multiplier = qPow(10.0, qRound(a_afArg[1]));
+        return qFloor(a_afArg[0] * multiplier + 0.5) / multiplier;
+    }
+
+    throw QmuParserError(QCoreApplication::translate("QmuParser", "invalid number of arguments for function rint.",
+                                                     "parser error message"));
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -386,14 +438,16 @@ void QmuParser::InitFun()
     DefineFun("exp",   qExp<qreal>);
     DefineFun("sqrt",  qSqrt<qreal>);
     DefineFun("sign",  Sign);
-    DefineFun("rint",  Rint);
     DefineFun("abs",   Abs);
+    DefineFun("odd",   Odd);
+    DefineFun("even",  Even);
     DefineFun("fmod",  FMod);
     // Functions with variable number of arguments
     DefineFun("sum",   Sum);
     DefineFun("avg",   Avg);
     DefineFun("min",   Min);
     DefineFun("max",   Max);
+    DefineFun("rint",  Rint);
 }
 
 //---------------------------------------------------------------------------------------------------------------------

@@ -460,8 +460,12 @@ void VTranslateVars::InitFunctions()
     functions.insert(exp_F, translate("VTranslateVars", "exp", "e raised to the power of x where e = 2.718\nUsage: exp(x) → returns a positive number\nExample: exp(2) = 7.38906"));
     functions.insert(sqrt_F, translate("VTranslateVars", "sqrt", "Square root of a value\nUsage: sqrt(x greater than or equal to 0) → returns a positive number\nExample: sqrt(4) = 2"));
     functions.insert(sign_F, translate("VTranslateVars", "sign", "Sign function -1 if x<0; 1 if x>0\nUsage: sign(x) → returns -1, 0 or 1\nExample: sign(-3) = -1"));
-    functions.insert(rint_F, translate("VTranslateVars", "rint", "Round to nearest integer\nUsage: rint(x) → returns an integer number\nExample: rint(2.3) = 2"));
+    functions.insert(rint_F, translate("VTranslateVars", "rint",
+                    "Round to nearest integer, or to a given number of decimal places\nUsage: rint(x) or "
+                    "rint(x; n) → returns a rounded number\nExample: rint(2.3) = 2\nExample: rint(3.14159; 2) = 3.14"));
     functions.insert(abs_F, translate("VTranslateVars", "abs", "Absolute value\nUsage: abs(x) → returns a positive number\nExample: abs(-5) = 5"));
+    functions.insert(odd_F, translate("VTranslateVars", "odd", "Round up to the nearest odd integer\nUsage: odd(x) → returns an odd integer\nExample: odd(31.2) = 33"));
+    functions.insert(even_F, translate("VTranslateVars", "even", "Round up to the nearest even integer\nUsage: even(x) → returns an even integer\nExample: even(32.2) = 34"));
     functions.insert(min_F, translate("VTranslateVars", "min", "Min of all arguments\nUsage: min(arg 1; arg 2; ... arg n)\nExample: min(2;3;4) = 2"));
     functions.insert(max_F, translate("VTranslateVars", "max", "Max of all arguments\nUsage: max(arg 1; arg 2; ... arg n)\nExample: max(2;3;4) = 4"));
     functions.insert(sum_F, translate("VTranslateVars", "sum", "Sum of all arguments\nUsage: sum(arg 1; arg 2; ... arg n)\nExample: sum(2;3;4) = 9"));

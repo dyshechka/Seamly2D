@@ -94,6 +94,8 @@ const QString sqrt_F  = QStringLiteral("sqrt");
 const QString sign_F  = QStringLiteral("sign");
 const QString rint_F  = QStringLiteral("rint");
 const QString abs_F   = QStringLiteral("abs");
+const QString odd_F   = QStringLiteral("odd");
+const QString even_F  = QStringLiteral("even");
 const QString min_F   = QStringLiteral("min");
 const QString max_F   = QStringLiteral("max");
 const QString sum_F   = QStringLiteral("sum");
@@ -105,8 +107,8 @@ const QStringList builInFunctions = QStringList() << degTorad_F << radTodeg_F
                                                   << sinh_F << cosh_F  << tanh_F << asinh_F << acosh_F << atanh_F
                                                   << sinD_F  << cosD_F   << tanD_F  << asinD_F  << acosD_F  << atanD_F
                                                   << log2_F << log10_F << log_F  << ln_F    << exp_F   << sqrt_F
-                                                  << sign_F << rint_F  << abs_F  << min_F   << max_F   << sum_F
-                                                  << avg_F << fmod_F;
+                                                  << sign_F << rint_F  << abs_F  << odd_F   << even_F  << min_F
+                                                  << max_F  << sum_F   << avg_F << fmod_F;
 
 // Postfix operators
 const QString cm_Oprt = QStringLiteral("cm");
