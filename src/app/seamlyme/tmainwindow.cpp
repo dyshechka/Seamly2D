@@ -2275,7 +2275,6 @@ void TMainWindow::SetupMenu()
 	actionDockDiagram = ui->dockWidgetDiagram->toggleViewAction();
 	actionDockDiagram->setMenuRole(QAction::NoRole);
 	ui->measurements_Menu->addAction(actionDockDiagram);
-	ui->mainToolBar->addAction(actionDockDiagram);
 	actionDockDiagram->setEnabled(false);
 	actionDockDiagram->setIcon(QIcon("://seamlymeicon/24x24/mannequin.png"));
 
