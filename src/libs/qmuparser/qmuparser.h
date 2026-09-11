@@ -82,8 +82,9 @@ namespace qmu
         static qreal Log10(qreal); // Logarithm Base 10
         // misc
         static qreal Abs(qreal);
-        static qreal Rint(qreal);
         static qreal Sign(qreal);
+        static qreal Odd(qreal);   // round up to the nearest odd integer
+        static qreal Even(qreal);  // round up to the nearest even integer
         static qreal FMod(qreal, qreal);
         // Prefix operators
         // !!! Unary Minus is a MUST if you want to use negative signs !!!
@@ -93,6 +94,7 @@ namespace qmu
         static qreal Avg(const qreal*, int);  // mean value
         static qreal Min(const qreal*, int);  // minimum
         static qreal Max(const qreal*, int);  // maximum
+        static qreal Rint(const qreal*, int); // round to nearest integer, or to n decimal places
     };
 
 //---------------------------------------------------------------------------------------------------------------------

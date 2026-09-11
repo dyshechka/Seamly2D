@@ -503,6 +503,8 @@ extern const QString sqrt_F;
 extern const QString sign_F;
 extern const QString rint_F;
 extern const QString abs_F;
+extern const QString odd_F;
+extern const QString even_F;
 extern const QString min_F;
 extern const QString max_F;
 extern const QString sum_F;
