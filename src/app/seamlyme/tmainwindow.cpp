@@ -1979,9 +1979,12 @@ void TMainWindow::SaveMValue()
 
 	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
 
-	// Replace line return character with spaces for calc if exist
+	// Keep line breaks as typed -- they are stored as-is (the parser treats them as
+	// insignificant whitespace, same as a space, and EvalFormula() below still
+	// flattens its own working copy before evaluating) so the formula keeps its
+	// multi-line formatting the next time this measurement is selected, instead of
+	// collapsing back to one line.
 	QString text = ui->plainTextEditFormula->toPlainText();
-	text.replace("\n", " ");
 
 	QTableWidgetItem *formulaField = ui->tableWidget->item(row, ColumnFormula);
 	if (formulaField->text() == text)
