@@ -61,6 +61,7 @@
 #include <QDialog>
 #include <QFont>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
 #include <QMapIterator>
@@ -209,8 +210,13 @@ EditFormulaDialog::~EditFormulaDialog()
 //---------------------------------------------------------------------------------------------------------------------
 void EditFormulaDialog::DialogAccepted()
 {
+    // Line breaks are kept as typed rather than flattened to spaces here -- they're
+    // insignificant whitespace to the formula parser either way (see VTranslateVars::
+    // FormulaFromUser()/EvalFormula(), which already tokenize past them), so nothing about
+    // evaluating this formula later depends on flattening it now. Discarding them here used to
+    // silently erase any multi-line formatting typed into this dialog's formula field the
+    // moment OK was pressed.
     m_formula = ui->plainTextEditFormula->toPlainText();
-    m_formula.replace("\n", " ");
     emit DialogClosed(QDialog::Accepted);
     accepted();
 }
@@ -561,6 +567,28 @@ void EditFormulaDialog::resizeEvent(QResizeEvent *event)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+bool EditFormulaDialog::eventFilter(QObject *object, QEvent *event)
+{
+    // DialogTool::eventFilter() (below) swallows Enter/Return entirely on every tool dialog's
+    // formula field -- fine for the short, single-line formulas those dialogs usually hold, but
+    // it meant there was no way to add a line break here at all, unlike the multi-line-capable
+    // Formula field in SeamlyMe's own window. Insert one here instead, same as pressing Enter
+    // already does in that other field, then let the base class still handle everything else
+    // (numpad decimal point translation, etc.) for this and every other tool dialog.
+    if (object == ui->plainTextEditFormula && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        if ((keyEvent->key() == Qt::Key_Enter) || (keyEvent->key() == Qt::Key_Return))
+        {
+            ui->plainTextEditFormula->insertPlainText(QStringLiteral("\n"));
+            return true;
+        }
+    }
+
+    return DialogTool::eventFilter(object, event);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void EditFormulaDialog::SetFormula(const QString &value)
 {
     m_formula = qApp->translateVariables()->FormulaToUser(value, qApp->Settings()->getOsSeparator());
@@ -840,24 +868,45 @@ void EditFormulaDialog::showFunctions()
     ui->tableWidget->setRowCount(0);
     ui->tableWidget->setColumnHidden(NumberColumn, true);
     ui->tableWidget->setColumnHidden(NameColumn, false);
-    ui->tableWidget->setColumnHidden(DescriptionColumn, true);
+    ui->tableWidget->setColumnHidden(DescriptionColumn, false);
     ui->tableWidget->setColumnHidden(ValueColumn, true);
     ui->tableWidget->setColumnHidden(FullNameColumn, true);
     ui->info_Label->setText("");
+
+    // A function's description can run to a full sentence -- let it wrap instead of being cut
+    // off, and size each row to fit. Switching to Fixed for the loop and resizing once after
+    // (instead of leaving ResizeToContents active the whole time) avoids the per-item resize
+    // cost that turned out to be expensive on SeamlyMe's own, much larger measurements table --
+    // see TMainWindow::RefreshTable(). Harmless either way on this short list, but no reason not
+    // to do it the same, cheaper way.
+    ui->tableWidget->setWordWrap(true);
+    ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
 
     QMap<QString, qmu::QmuTranslation>::const_iterator i = qApp->translateVariables()->getFunctions().constBegin();
     while (i != qApp->translateVariables()->getFunctions().constEnd())
     {
         ui->tableWidget->setRowCount(ui->tableWidget->rowCount() + 1);
+        const QString description = i.value().getMdisambiguation();
+
         QTableWidgetItem *item = new QTableWidgetItem(i.value().translate());
+        item->setToolTip(description);
         ui->tableWidget->setItem(ui->tableWidget->rowCount()-1, NameColumn, item);
-        item->setToolTip(i.value().getMdisambiguation());
+
+        QTableWidgetItem *descItem = new QTableWidgetItem(description);
+        descItem->setToolTip(description);
+        descItem->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        ui->tableWidget->setItem(ui->tableWidget->rowCount()-1, DescriptionColumn, descItem);
+
         ++i;
     }
+
+    ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    ui->tableWidget->resizeRowsToContents();
 
     ui->tableWidget->blockSignals(false);
     ui->tableWidget->selectRow(0);
     ui->tableWidget->resizeColumnsToContents();
+    ui->tableWidget->horizontalHeader()->setSectionResizeMode(DescriptionColumn, QHeaderView::Stretch);
     ui->tableWidget->horizontalHeader()->setStretchLastSection(false);
 }
 

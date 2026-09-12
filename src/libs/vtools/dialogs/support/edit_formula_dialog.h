@@ -118,6 +118,10 @@ protected:
     virtual void closeEvent(QCloseEvent *event) override;
     virtual void showEvent( QShowEvent *event ) override;
     virtual void resizeEvent(QResizeEvent *event) override;
+    // Lets Enter/Return insert a line break in plainTextEditFormula instead of being swallowed
+    // by DialogTool::eventFilter() (which every other tool dialog sharing that base class still
+    // relies on) -- see the .cpp for why this is scoped to just this one field/dialog.
+    virtual bool  eventFilter(QObject *object, QEvent *event) override;
 
 private slots:
     void         filterVariables(const QString &filter);

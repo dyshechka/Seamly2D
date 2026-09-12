@@ -1610,8 +1610,12 @@ void TMainWindow::Fx()
 
 	EditFormulaDialog *dialog = new EditFormulaDialog(meash->GetData(), NULL_ID, MeasurementDialog, this);
 	dialog->setWindowTitle(tr("Edit measurement"));
-	dialog->SetFormula(qApp->translateVariables()->TryFormulaFromUser(ui->plainTextEditFormula->toPlainText().replace("\n", " "),
-														  true));
+	// Keep line breaks as typed when opening the dialog -- flattening them here used to throw
+	// away her multi-line formatting the moment "Функция" was opened, before she'd even touched
+	// anything. The parser treats a line break as insignificant whitespace either way (same as
+	// TranslateVariables()/EvalFormula() elsewhere in this file), so nothing about evaluation
+	// depends on flattening it first.
+	dialog->SetFormula(qApp->translateVariables()->TryFormulaFromUser(ui->plainTextEditFormula->toPlainText(), true));
 	const QString postfix = UnitsToStr(mUnit, true);//Show unit in dialog label (cm, mm or inch)
 	dialog->setPostfix(postfix);
 
@@ -2987,6 +2991,15 @@ void TMainWindow::RefreshTable(bool freshCall)
 	ui->tableWidget->blockSignals(true);
 	ui->tableWidget->clearContents();
 
+	// The vertical header normally stays in ResizeToContents mode so a row's height always
+	// matches its (word-wrapped) content. But that mode makes every single setItem() call below
+	// trigger its own synchronous row-height recompute -- unnoticeable on a small file, but on
+	// Марта's 150-row file (2026-09-12) that alone added several seconds to editing a single
+	// formula, and made the window unresponsive to clicks for as long as it took. Switch to
+	// Fixed for the duration of the populate loop and do one resizeRowsToContents() call after
+	// it instead -- same final row heights, one pass instead of ~900 (150 rows x ~6 columns).
+	ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+
 	ShowUnits();
 
 	const QMap<QString, QSharedPointer<MeasurementVariable> > table = data->DataMeasurements();
@@ -3093,8 +3106,14 @@ void TMainWindow::RefreshTable(bool freshCall)
 		{
 			ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
 		}
-		ui->tableWidget->resizeRowsToContents();
 	}
+
+	// Restore the normal auto-sizing mode now that the table is fully populated, and size every
+	// row in one batched pass -- see the comment above the Fixed switch at the top of this
+	// function for why this is done once here instead of implicitly on every setItem() above.
+	ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+	ui->tableWidget->resizeRowsToContents();
+
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
 	ui->tableWidget->blockSignals(false);
 

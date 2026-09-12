@@ -3,7 +3,7 @@
  <class>EditFormulaDialog</class>
  <widget class="QDialog" name="EditFormulaDialog">
   <property name="windowModality">
-   <enum>Qt::WindowModal</enum>
+   <enum>Qt::WindowModality::WindowModal</enum>
   </property>
   <property name="geometry">
    <rect>
@@ -53,7 +53,7 @@
         <number>0</number>
        </property>
        <property name="sizeConstraint">
-        <enum>QLayout::SetFixedSize</enum>
+        <enum>QLayout::SizeConstraint::SetFixedSize</enum>
        </property>
        <item>
         <widget class="QListWidget" name="menuTab_ListWidget">
@@ -92,10 +92,10 @@ QListWidget::item:selected {
 </string>
          </property>
          <property name="verticalScrollBarPolicy">
-          <enum>Qt::ScrollBarAlwaysOff</enum>
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
          </property>
          <property name="horizontalScrollBarPolicy">
-          <enum>Qt::ScrollBarAlwaysOff</enum>
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
          </property>
          <property name="autoScroll">
           <bool>false</bool>
@@ -107,7 +107,7 @@ QListWidget::item:selected {
           <bool>false</bool>
          </property>
          <property name="selectionBehavior">
-          <enum>QAbstractItemView::SelectItems</enum>
+          <enum>QAbstractItemView::SelectionBehavior::SelectItems</enum>
          </property>
          <property name="iconSize">
           <size>
@@ -116,13 +116,13 @@ QListWidget::item:selected {
           </size>
          </property>
          <property name="textElideMode">
-          <enum>Qt::ElideNone</enum>
+          <enum>Qt::TextElideMode::ElideNone</enum>
          </property>
          <property name="resizeMode">
-          <enum>QListView::Adjust</enum>
+          <enum>QListView::ResizeMode::Adjust</enum>
          </property>
          <property name="layoutMode">
-          <enum>QListView::SinglePass</enum>
+          <enum>QListView::LayoutMode::SinglePass</enum>
          </property>
          <property name="spacing">
           <number>0</number>
@@ -134,7 +134,7 @@ QListWidget::item:selected {
           </size>
          </property>
          <property name="viewMode">
-          <enum>QListView::ListMode</enum>
+          <enum>QListView::ViewMode::ListMode</enum>
          </property>
          <property name="uniformItemSizes">
           <bool>false</bool>
@@ -146,7 +146,7 @@ QListWidget::item:selected {
           <bool>false</bool>
          </property>
          <property name="itemAlignment">
-          <set>Qt::AlignCenter</set>
+          <set>Qt::AlignmentFlag::AlignCenter</set>
          </property>
          <item>
           <property name="text">
@@ -261,10 +261,10 @@ QListWidget::item:selected {
           </size>
          </property>
          <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
+          <enum>QFrame::Shape::StyledPanel</enum>
          </property>
          <property name="frameShadow">
-          <enum>QFrame::Sunken</enum>
+          <enum>QFrame::Shadow::Sunken</enum>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_4">
           <property name="leftMargin">
@@ -281,7 +281,7 @@ QListWidget::item:selected {
           </property>
           <item>
            <layout class="QHBoxLayout" name="horizontalLayout_2">
-            <item alignment="Qt::AlignLeft">
+            <item alignment="Qt::AlignmentFlag::AlignLeft">
              <widget class="QLabel" name="labelEditFormula">
               <property name="sizePolicy">
                <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -359,7 +359,7 @@ QListWidget::item:selected {
             <item>
              <spacer name="horizontalSpacer">
               <property name="orientation">
-               <enum>Qt::Horizontal</enum>
+               <enum>Qt::Orientation::Horizontal</enum>
               </property>
               <property name="sizeHint" stdset="0">
                <size>
@@ -396,6 +396,9 @@ QListWidget::item:selected {
               <property name="toolTip">
                <string>Calculation</string>
               </property>
+              <property name="verticalScrollBarPolicy">
+               <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOn</enum>
+              </property>
               <property name="tabChangesFocus">
                <bool>true</bool>
               </property>
@@ -427,7 +430,7 @@ QListWidget::item:selected {
                  </size>
                 </property>
                 <property name="focusPolicy">
-                 <enum>Qt::StrongFocus</enum>
+                 <enum>Qt::FocusPolicy::StrongFocus</enum>
                 </property>
                 <property name="toolTip">
                  <string>Clear formula</string>
@@ -480,7 +483,7 @@ QListWidget::item:selected {
                  </size>
                 </property>
                 <property name="focusPolicy">
-                 <enum>Qt::StrongFocus</enum>
+                 <enum>Qt::FocusPolicy::StrongFocus</enum>
                 </property>
                 <property name="toolTip">
                  <string>Reset to original formula</string>
@@ -534,10 +537,10 @@ QListWidget::item:selected {
           </size>
          </property>
          <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
+          <enum>QFrame::Shape::StyledPanel</enum>
          </property>
          <property name="frameShadow">
-          <enum>QFrame::Sunken</enum>
+          <enum>QFrame::Shadow::Sunken</enum>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout">
           <property name="leftMargin">
@@ -571,7 +574,7 @@ QListWidget::item:selected {
                  </size>
                 </property>
                 <property name="focusPolicy">
-                 <enum>Qt::StrongFocus</enum>
+                 <enum>Qt::FocusPolicy::StrongFocus</enum>
                 </property>
                 <property name="toolTip">
                  <string>Insert variable into formula</string>
@@ -810,7 +813,7 @@ QListWidget::item:selected {
               <item>
                <spacer name="horizontalSpacer_2">
                 <property name="orientation">
-                 <enum>Qt::Horizontal</enum>
+                 <enum>Qt::Orientation::Horizontal</enum>
                 </property>
                 <property name="sizeHint" stdset="0">
                  <size>
@@ -836,6 +839,9 @@ QListWidget::item:selected {
                 <height>0</height>
                </size>
               </property>
+              <property name="alternatingRowColors">
+               <bool>true</bool>
+              </property>
               <property name="cursor" stdset="0">
                <cursorShape>PointingHandCursor</cursorShape>
               </property>
@@ -843,13 +849,13 @@ QListWidget::item:selected {
                <string notr="true"/>
               </property>
               <property name="frameShape">
-               <enum>QFrame::StyledPanel</enum>
+               <enum>QFrame::Shape::StyledPanel</enum>
               </property>
               <property name="verticalScrollBarPolicy">
-               <enum>Qt::ScrollBarAlwaysOn</enum>
+               <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOn</enum>
               </property>
               <property name="sizeAdjustPolicy">
-               <enum>QAbstractScrollArea::AdjustIgnored</enum>
+               <enum>QAbstractScrollArea::SizeAdjustPolicy::AdjustIgnored</enum>
               </property>
               <property name="autoScroll">
                <bool>true</bool>
@@ -1004,10 +1010,10 @@ QListWidget::item:selected {
           </size>
          </property>
          <property name="frameShape">
-          <enum>QFrame::Box</enum>
+          <enum>QFrame::Shape::Box</enum>
          </property>
          <property name="frameShadow">
-          <enum>QFrame::Sunken</enum>
+          <enum>QFrame::Shadow::Sunken</enum>
          </property>
          <property name="text">
           <string/>
@@ -1024,10 +1030,10 @@ QListWidget::item:selected {
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
-      <enum>Qt::Horizontal</enum>
+      <enum>Qt::Orientation::Horizontal</enum>
      </property>
      <property name="standardButtons">
-      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+      <set>QDialogButtonBox::StandardButton::Cancel|QDialogButtonBox::StandardButton::Ok</set>
      </property>
     </widget>
    </item>
@@ -1038,8 +1044,8 @@ QListWidget::item:selected {
   <tabstop>buttonBox</tabstop>
  </tabstops>
  <resources>
-  <include location="../../../vmisc/share/resources/icon.qrc"/>
   <include location="../../../vmisc/share/resources/theme.qrc"/>
+  <include location="../../../vmisc/share/resources/icon.qrc"/>
  </resources>
  <connections>
   <connection>
