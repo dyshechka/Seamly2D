@@ -63,6 +63,7 @@
 #include "dialogs/me_shortcuts_dialog.h"
 #include "../vpatterndb/calculator.h"
 #include "../vpatterndb/measurements_def.h"
+#include "../vpatterndb/knit_measurements.h"
 #include "../vpatterndb/pmsystems.h"
 #include "../ifc/ifcdef.h"
 #include "../ifc/xml/individual_size_converter.h"
@@ -1938,7 +1939,10 @@ void TMainWindow::SaveMName(const QString &text)
 
 	if (meash->isCustom())
 	{
-		newName.isEmpty() ? newName = GetCustomName() : newName = CustomMSign + newName;
+		if (newName.isEmpty())
+		{
+			newName = GetCustomName();
+		}
 
 		if (!data->IsUnique(newName))
 		{
@@ -2662,6 +2666,8 @@ void TMainWindow::SetCurrentFile(const QString &fileName)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::SaveMeasurements(const QString &fileName, QString &error)
 {
+	RegisterNewKnitMeasurements();
+
 	const bool result = individualMeasurements->SaveDocument(fileName, error);
 	if (result)
 	{
@@ -2669,6 +2675,42 @@ bool TMainWindow::SaveMeasurements(const QString &fileName, QString &error)
 		MeasurementsWasSaved(result);
 	}
 	return result;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Adds every measurement in this file that isn't a built-in sewing
+/// measurement and isn't already in Марта's knitting-measurement dictionary
+/// to that dictionary, using whatever full name and description she's
+/// typed for it so far. Called right before saving, so a plain name she
+/// just created (no "@") is "known" the next time this or any other file
+/// uses it -- she never has to think about the "@" prefix at all.
+void TMainWindow::RegisterNewKnitMeasurements()
+{
+	if (individualMeasurements == nullptr || mType != MeasurementsType::Individual)
+	{
+		return;
+	}
+
+	const QStringList sewingNames = AllGroupNames();
+	const QStringList allNames = individualMeasurements->ListAll();
+
+	for (const QString &name : allNames)
+	{
+		if (name.indexOf(CustomMSign) == 0 || sewingNames.contains(name) || IsKnitMeasurement(name))
+		{
+			continue; // legacy "@" custom name, a sewing measurement, or already registered
+		}
+
+		try
+		{
+			const QSharedPointer<MeasurementVariable> meash = data->getVariable<MeasurementVariable>(name);
+			RegisterKnitMeasurement(name, meash->getGuiText(), meash->GetDescription());
+		}
+		catch (const VExceptionBadId &exception)
+		{
+			Q_UNUSED(exception)
+		}
+	}
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2925,7 +2967,7 @@ QString TMainWindow::GetCustomName() const
 	QString name;
 	do
 	{
-		name = CustomMSign + qApp->translateVariables()->InternalVarToUser(measurement_) + QString().number(num);
+		name = qApp->translateVariables()->InternalVarToUser(measurement_) + QString().number(num);
 		num++;
 	} while (data->IsUnique(name) == false);
 
@@ -3170,15 +3212,29 @@ void TMainWindow::MeasurementGUI()
 {
 	if (const QTableWidgetItem *nameField = ui->tableWidget->item(ui->tableWidget->currentRow(), ColumnName))
 	{
-		const bool isCustom = !(nameField->text().indexOf(CustomMSign) == 0);
-		ui->lineEditName->setReadOnly(isCustom);
-		ui->plainTextEditDescription->setReadOnly(isCustom);
-		ui->lineEditFullName->setReadOnly(isCustom);
+		// Read-only unless we can confirm this measurement is the user's own
+		// to edit (MeasurementVariable::isCustom() -- no longer just an "@"
+		// check, see measurement_variable.cpp).
+		bool isKnown = true;
+		try
+		{
+			const QSharedPointer<MeasurementVariable> meash =
+				data->getVariable<MeasurementVariable>(nameField->data(Qt::UserRole).toString());
+			isKnown = !meash->isCustom();
+		}
+		catch (const VExceptionBadId &exception)
+		{
+			Q_UNUSED(exception)
+		}
+
+		ui->lineEditName->setReadOnly(isKnown);
+		ui->plainTextEditDescription->setReadOnly(isKnown);
+		ui->lineEditFullName->setReadOnly(isKnown);
 
 		// Need to block signals for QLineEdit in readonly mode because it still emits
 		// QLineEdit::editingFinished signal.
-		ui->lineEditName->blockSignals(isCustom);
-		ui->lineEditFullName->blockSignals(isCustom);
+		ui->lineEditName->blockSignals(isKnown);
+		ui->lineEditFullName->blockSignals(isKnown);
 
 		Controls(); // Buttons remove, up, down
 	}

@@ -230,6 +230,7 @@ private:
 
     QString             GetCustomName() const;
     QString             ClearCustomName(const QString &name) const;
+    void                RegisterNewKnitMeasurements();
 
     bool                EvalFormula(const QString &formula, bool fromUser, VContainer *data, QLabel *label);
     QString             getMeasurementNumber(const QString &name);

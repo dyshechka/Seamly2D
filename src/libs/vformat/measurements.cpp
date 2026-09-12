@@ -318,6 +318,23 @@ void MeasurementDoc::readMeasurements() const
             Q_UNUSED(error)
         }
 
+        // Files normally don't repeat a knitting measurement's full name and
+        // description (that's the point of the dictionary) -- fill them in
+        // here so every display path shows the same text regardless of
+        // whether this measurement counts as "custom". An explicit value
+        // already in the file always wins.
+        if (IsKnitMeasurement(name))
+        {
+            if (fullName.isEmpty())
+            {
+                fullName = KnitFullName(name);
+            }
+            if (description.isEmpty())
+            {
+                description = KnitDescription(name);
+            }
+        }
+
         QSharedPointer<MeasurementVariable> meash;
         QSharedPointer<MeasurementVariable> tempMeash;
         if (type == MeasurementsType::Multisize)
