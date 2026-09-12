@@ -56,7 +56,6 @@
 #include "tmainwindow.h"
 #include "ui_tmainwindow.h"
 #include "dialogs/dialogaboutseamlyme.h"
-#include "dialogs/new_measurements_dialog.h"
 #include "dialogs/database_dialog.h"
 #include "dialogs/dialogseamlymepreferences.h"
 #include "dialogs/dialogexporttocsv.h"
@@ -417,34 +416,20 @@ void TMainWindow::FileNew()
 {
 	if (individualMeasurements == nullptr)
 	{
-		NewMeasurementsDialog measurements(this);
-		if (measurements.exec() == QDialog::Rejected)
-		{
-			return;
-		}
-
-		mUnit = measurements.measurementUnits();
+		// The old "New measurement file" dialog (type/unit/base size/base
+		// height) has been removed -- new files are always Individual, in
+		// centimeters. Multisize files can still be opened via "Open
+		// multisize" even though they're no longer offered when creating a
+		// new file.
+		mUnit = Unit::Cm;
 		pUnit = mUnit;
-		mType = measurements.type();
+		mType = MeasurementsType::Individual;
 
 		data = new VContainer(qApp->translateVariables(), &mUnit);
-		currentHeight = measurements.baseHeight();
-		currentSize = measurements.baseSize();
 
-		if (mType == MeasurementsType::Multisize)
-		{
-			individualMeasurements = new MeasurementDoc(mUnit, measurements.baseSize(), measurements.baseHeight(), data);
-			individualMeasurements->setSize(&currentSize);
-			individualMeasurements->setHeight(&currentHeight);
-			m_curFileFormatVersion = MultiSizeConverter::MeasurementMaxVer;
-			m_curFileFormatVersionStr = MultiSizeConverter::MeasurementMaxVerStr;
-		}
-		else
-		{
-			individualMeasurements = new MeasurementDoc(mUnit, data);
-			m_curFileFormatVersion = IndividualSizeConverter::MeasurementMaxVer;
-			m_curFileFormatVersionStr = IndividualSizeConverter::MeasurementMaxVerStr;
-		}
+		individualMeasurements = new MeasurementDoc(mUnit, data);
+		m_curFileFormatVersion = IndividualSizeConverter::MeasurementMaxVer;
+		m_curFileFormatVersionStr = IndividualSizeConverter::MeasurementMaxVerStr;
 
 		m_isReadOnly = individualMeasurements->isReadOnly();
 		UpdatePadlock(m_isReadOnly);

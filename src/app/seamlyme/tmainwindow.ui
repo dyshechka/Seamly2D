@@ -559,7 +559,7 @@
                  </property>
                 </widget>
                </item>
-               <item alignment="Qt::AlignRight">
+               <item alignment="Qt::AlignmentFlag::AlignRight">
                 <widget class="QToolButton" name="toolButtonExpr">
                  <property name="enabled">
                   <bool>false</bool>
@@ -1617,6 +1617,9 @@
    <property name="text">
     <string>Add known</string>
    </property>
+   <property name="visible">
+    <bool>false</bool>
+   </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>
    </property>
@@ -1631,6 +1634,9 @@
    </property>
    <property name="text">
     <string>Add custom</string>
+   </property>
+   <property name="shortcut">
+    <string>Meta+Т</string>
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>

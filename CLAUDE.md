@@ -150,10 +150,26 @@ through the `computer_app_*` (background control, preferred) and
 
 ## Working style expected here
 
-- Verify every change actually builds (see above) before telling Марта it's
-  done — a report of success should mean you watched it build and, where
-  practical, watched the specific behavior work in the running app.
+- **As of 2026-09-12, Марта asked for two changes to this workflow — follow
+  these until she says otherwise:**
+  - **Don't verify in-app behavior yourself anymore.** It's enough that the
+    project builds (see "Building & testing" above — check the Issues/
+    Compile Output pane and/or the built binary's mtime). Instead of
+    clicking through the running app to test a change, write out plain-
+    language test steps ("open file X, do Y, you should see Z") so Марта
+    can check it herself.
+  - **Don't commit or push to GitHub.** Git is now her responsibility. Edit
+    files and confirm they build as usual, but leave changes uncommitted —
+    tell her in Russian which files changed and what to test; she'll
+    handle `git add`/commit/push herself (likely via GitHub Desktop, which
+    is already set up on this Mac).
+- Because commits are no longer made automatically each session, **check
+  `git status`/`git diff` at the start of every session** — Марта may have
+  made her own small edits (e.g. directly in Qt Creator's Design view) that
+  are sitting uncommitted. Take those into account rather than overwriting
+  or ignoring them, and don't assume the working tree matches the last
+  commit.
 - Prefer small, reviewable changes over large ones.
-- When scope is ambiguous (what belongs in this commit, whether to touch a
-  file that looks pre-existing/unrelated, whether it's safe to push), ask
-  in plain language rather than guessing.
+- When scope is ambiguous (what belongs in one logical change, whether to
+  touch a file that looks pre-existing/unrelated), ask in plain language
+  rather than guessing.
