@@ -51,6 +51,7 @@
 
 #include "calculator.h"
 
+#include <QObject>
 #include <QString>
 #include <QStringList>
 
@@ -129,6 +130,38 @@ qreal Calculator::EvalFormula(const QHash<QString, QSharedPointer<VInternalVaria
 
 //---------------------------------------------------------------------------------------------------------------------
 /**
+ * @brief Calculator::GetUsedVariables list the variable/measurement names referenced by a
+ * formula. See the declaration in calculator.h for why this exists and what it reuses from
+ * EvalFormula() above.
+ */
+QStringList Calculator::GetUsedVariables(const QString &formula)
+{
+    // Parser doesn't know any variable at this stage either -- same var factory trick as
+    // EvalFormula() above, so an unknown name doesn't throw before we get a chance to list it.
+    SetVarFactory(AddVariable, this);
+    SetSepForEval();
+    SetExpr(formula);
+    Eval();
+
+    QMap<int, QString> tokens = this->GetTokens();
+
+    // Same cleanup as EvalFormula() above: strip the unary-minus token and built-in function
+    // names, leaving only genuine variable/measurement names.
+    RemoveAll(tokens, QStringLiteral("-"));
+    for (int i = 0; i < builInFunctions.size(); ++i)
+    {
+        if (tokens.isEmpty())
+        {
+            break;
+        }
+        RemoveAll(tokens, builInFunctions.at(i));
+    }
+
+    return tokens.values();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
  * @brief Calculator::InitVariables add variables to parser.
  *
  * For optimization purpose we try don't add variables that we don't need.
@@ -140,6 +173,12 @@ qreal Calculator::EvalFormula(const QHash<QString, QSharedPointer<VInternalVaria
 void Calculator::InitVariables(const QHash<QString, QSharedPointer<VInternalVariable> > *vars,
                                const QMap<int, QString> &tokens, const QString &formula)
 {
+    // Only used for the generic "Unexpected token" error this function used to throw below --
+    // no longer needed now that this has its own, more specific message. Left as a parameter
+    // (rather than changed to remove it) since it documents what the tokens/positions below are
+    // positions *into*, for anyone reading vs. calling this.
+    Q_UNUSED(formula);
+
     QMap<int, QString>::const_iterator i = tokens.constBegin();
     while (i != tokens.constEnd())
     {
@@ -157,7 +196,22 @@ void Calculator::InitVariables(const QHash<QString, QSharedPointer<VInternalVari
 
         if (found == false)
         {
-            throw qmu::QmuParserError (qmu::ecUNASSIGNABLE_TOKEN, i.value(), formula, i.key());
+            // By this point the formula has already survived a full parse (EvalFormula()'s
+            // first Eval() pass, with a stub variable factory that accepts anything shaped
+            // like a name) -- so this token is never raw syntax garbage; garbage would already
+            // have thrown one of the parser's own "Unexpected ..." errors before this function
+            // ever ran. What lands here is always a token that parses fine AS A NAME but isn't
+            // one this formula actually has -- most often a mistyped, wrong-script (a Cyrillic
+            // letter standing in for its Latin look-alike, or the reverse), or no-longer-
+            // existing name. The generic parser wording ("Unexpected token") doesn't tell those
+            // two situations apart, which is exactly what made a mismatched name so hard to
+            // track down -- so this gets its own, more actionable message instead of reusing
+            // qmu::ecUNASSIGNABLE_TOKEN's generic text (see qmuparsererror.cpp).
+            throw qmu::QmuParserError(
+                QObject::tr("Variable \"$TOK$\" not found (position $POS$). Check that the name is "
+                            "typed correctly (including letter case and keyboard layout) and that "
+                            "it wasn't deleted or renamed."),
+                i.key(), i.value());
         }
         ++i;
     }

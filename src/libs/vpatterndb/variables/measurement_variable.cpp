@@ -104,9 +104,9 @@ MeasurementVariable::MeasurementVariable(quint32 index, const QString &name, qre
  */
 MeasurementVariable::MeasurementVariable(VContainer *data, quint32 index, const QString &name, const qreal &base,
                            const QString &formula, bool ok, const QString &gui_text, const QString &description,
-                           const QString &tagName)
+                           const QString &tagName, bool isSection)
     : VVariable(name, description)
-    , d(new MeasurementVariableData(data, index, formula, ok, gui_text, tagName, base))
+    , d(new MeasurementVariableData(data, index, formula, ok, gui_text, tagName, base, isSection))
 {
     SetType(VarType::Measurement);
     VInternalVariable::SetValue(base);
@@ -313,6 +313,12 @@ int MeasurementVariable::Index() const
 bool MeasurementVariable::IsFormulaOk() const
 {
     return d->formulaOk;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool MeasurementVariable::IsSection() const
+{
+    return d->isSection;
 }
 
 //---------------------------------------------------------------------------------------------------------------------

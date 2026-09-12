@@ -56,6 +56,7 @@
 #include <QHash>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 #include "../qmuparser/qmuformulabase.h"
@@ -87,6 +88,16 @@ public:
     virtual ~Calculator() Q_DECL_EQ_DEFAULT;
 
     qreal EvalFormula(const QHash<QString, QSharedPointer<VInternalVariable> > *vars, const QString &formula);
+
+    // Lists the variable/measurement names a formula references, without needing their current
+    // values or even a fully valid formula overall -- reuses the same token-extraction the first
+    // half of EvalFormula() above already does internally (parse, then strip the unary-minus
+    // token and built-in function names), just returning the names instead of a computed result.
+    // Used to build a "who references this measurement" index for SeamlyMe's row highlighting
+    // (see TMainWindow::RefreshTable()). Throws qmu::QmuParserError if the formula can't even be
+    // tokenized (e.g. broken syntax) -- callers should catch that and treat it as "no known
+    // dependencies right now" rather than propagate it.
+    QStringList GetUsedVariables(const QString &formula);
 private:
     Q_DISABLE_COPY(Calculator)
 

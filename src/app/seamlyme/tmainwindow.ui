@@ -390,6 +390,19 @@
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_5">
            <item>
+            <widget class="QCheckBox" name="checkBoxIsSection">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="toolTip">
+              <string>Marks this row as a section divider, not a real measurement -- it has no formula and is never used in calculations. Just a way to split a long measurement list into logical groups.</string>
+             </property>
+             <property name="text">
+              <string>Section (not used in calculations)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <layout class="QHBoxLayout" name="horizontalLayout_3">
              <item>
               <widget class="QLabel" name="label">

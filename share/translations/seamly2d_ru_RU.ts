@@ -9764,6 +9764,10 @@ Press enter to temporarily add it to the list.</source>
         <translation>Невозможно расширить конечную точку внутреннего пути &apos;%1&apos; до линии разреза.</translation>
     </message>
     <message>
+        <source>Variable &quot;$TOK$&quot; not found (position $POS$). Check that the name is typed correctly (including letter case and keyboard layout) and that it wasn&apos;t deleted or renamed.</source>
+        <translation>Переменная «$TOK$» не найдена (позиция $POS$). Проверьте, что имя набрано правильно (включая регистр и раскладку клавиатуры), и что оно не было удалено или переименовано.</translation>
+    </message>
+    <message>
         <source>%1</source>
         <translation>%1</translation>
     </message>
@@ -11142,6 +11146,10 @@ Press enter to temporarily add it to the list.</source>
 </context>
 <context>
     <name>TMainWindow</name>
+    <message>
+        <source>Section (not used in calculations)</source>
+        <translation>Блок-разделитель</translation>
+    </message>
     <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:18pt;&quot;&gt;Select New for creation measurement file.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:18pt;&quot;&gt;Выберите Новый для создания файла мерок.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>

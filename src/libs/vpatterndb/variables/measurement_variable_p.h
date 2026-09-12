@@ -84,11 +84,12 @@ public:
           ksize(ksize),
           kheight(kheight),
           baseSize(baseSize),
-          baseHeight(baseHeight)
+          baseHeight(baseHeight),
+          isSection(false)
     {}
 
     MeasurementVariableData(VContainer *data, quint32 index, const QString &formula, bool ok, const QString &gui_text,
-                     const QString &tagName, qreal base)
+                     const QString &tagName, qreal base, bool isSection = false)
         : data(*data),
           index(index),
           formula(formula),
@@ -102,7 +103,8 @@ public:
           ksize(0),
           kheight(0),
           baseSize(0),
-          baseHeight(0)
+          baseHeight(0),
+          isSection(isSection)
     {}
 
     MeasurementVariableData(const MeasurementVariableData &m)
@@ -120,7 +122,8 @@ public:
           ksize(m.ksize),
           kheight(m.kheight),
           baseSize(m.baseSize),
-          baseHeight(m.baseHeight)
+          baseHeight(m.baseHeight),
+          isSection(m.isSection)
     {}
 
     virtual    ~MeasurementVariableData();
@@ -139,6 +142,11 @@ public:
     qreal       kheight;        //! @brief kgrowth increment in heights */
     qreal       baseSize;
     qreal       baseHeight;
+    // Marks this measurement as a section divider (Individual/single-size files only) -- not a
+    // real measurement, no formula is ever evaluated for it. Purely organizational, so a long
+    // measurement list can be split into logical groups. See TMainWindow's checkBoxIsSection and
+    // MeasurementDoc::AttrIsSection for where this is set and persisted.
+    bool        isSection;
 
 private:
     MeasurementVariableData &operator=(const MeasurementVariableData &) Q_DECL_EQ_DELETE;

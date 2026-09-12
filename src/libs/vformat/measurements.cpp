@@ -106,6 +106,7 @@ const QString MeasurementDoc::AttrHeightIncrease  = QStringLiteral("height_incre
 const QString MeasurementDoc::AttrDescription     = QStringLiteral("description");
 const QString MeasurementDoc::AttrName            = QStringLiteral("name");
 const QString MeasurementDoc::AttrFullName        = QStringLiteral("full_name");
+const QString MeasurementDoc::AttrIsSection       = QStringLiteral("isSection");
 
 const QString MeasurementDoc::GenderMale          = QStringLiteral("male");
 const QString MeasurementDoc::GenderFemale        = QStringLiteral("female");
@@ -368,12 +369,17 @@ void MeasurementDoc::readMeasurements() const
             bool ok = false;
             qreal value = EvalFormula(tempData.data(), formula, &ok);
 
+            // Section-divider rows (see AttrIsSection/TMainWindow::checkBoxIsSection) are purely
+            // organizational -- absent on older files, which is exactly "not a section" (false).
+            const bool isSection = getParameterBool(dom, AttrIsSection, falseStr);
+
             tempMeash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(tempData.data(), static_cast<quint32>(i), name,
-                                                                      value, formula, ok, fullName, description));
+                                                                      value, formula, ok, fullName, description, QString(),
+                                                                      isSection));
 
             value = UnitConvertor(value, measurementUnits(), *data->GetPatternUnit());
             meash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(data, static_cast<quint32>(i), name, value, formula,
-                                                                  ok, fullName, description));
+                                                                  ok, fullName, description, QString(), isSection));
         }
         tempData->AddVariable(name, tempMeash);
         data->AddVariable(name, meash);
@@ -657,6 +663,20 @@ void MeasurementDoc::SetMFullName(const QString &name, const QString &text)
     if (not node.isNull())
     {
         SetAttribute(node, AttrFullName, text);
+    }
+    else
+    {
+        qWarning() << tr("Can't find measurement '%1'").arg(name);
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void MeasurementDoc::SetMIsSection(const QString &name, bool value)
+{
+    QDomElement node = FindM(name);
+    if (not node.isNull())
+    {
+        SetAttribute<bool>(node, AttrIsSection, value);
     }
     else
     {

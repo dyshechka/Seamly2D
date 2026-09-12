@@ -84,7 +84,8 @@ public:
 
                        MeasurementVariable(VContainer *data, quint32 index, const QString &name, const qreal &base,
                                            const QString &formula, bool ok, const QString &gui_text = QString(),
-                                           const QString &description = QString(), const QString &tagName = QString());
+                                           const QString &description = QString(), const QString &tagName = QString(),
+                                           bool isSection = false);
 
                        MeasurementVariable(const MeasurementVariable &m);
     virtual           ~MeasurementVariable() override;
@@ -108,6 +109,10 @@ public:
 
     int                Index() const;
     bool               IsFormulaOk() const;
+
+    // True for a "section divider" row (Individual/single-size files only) -- not a real
+    // measurement, has no formula, never enters calculations. See measurement_variable_p.h.
+    bool               IsSection() const;
 
     virtual bool       isNotUsed() const override;
 

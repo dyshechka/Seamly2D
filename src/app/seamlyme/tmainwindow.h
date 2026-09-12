@@ -56,6 +56,9 @@
 #ifndef TMAINWINDOW_H
 #define TMAINWINDOW_H
 
+#include <QColor>
+#include <QMap>
+#include <QSet>
 #include <QTableWidget>
 
 #include "../vmisc/def.h"
@@ -162,6 +165,7 @@ private slots:
     void                SaveMHeightIncrease(double value);
     void                SaveMDescription();
     void                SaveMFullName();
+    void                SaveMIsSection(bool checked);
 
     void                patternUnitsChanged(int index);
 
@@ -198,6 +202,29 @@ private:
     QString             m_currentName;      // Stores the translated name text
     QString             m_currentDescription;
 
+    // Row-highlighting support for the measurements table -- see RefreshTable().
+    // m_usedByMeasurement is a reverse formula-dependency index (name -> names of measurements
+    // whose formula references it), rebuilt every time the table is refreshed.
+    // m_affectedMeasurements holds the names of measurements whose row should show the "check
+    // me, something I depend on just changed" (pink) highlight -- populated by
+    // MarkMeasurementSaved(), cleared once that row is viewed (ShowNewMData()) or its own
+    // formula is (re)saved.
+    // m_formulaDrafts holds unsaved, currently-invalid formula text by measurement name (orange
+    // highlight) -- see CommitMValue()/ShowNewMData().
+    QMap<QString, QStringList> m_usedByMeasurement;
+    QSet<QString>              m_affectedMeasurements;
+    QMap<QString, QString>     m_formulaDrafts;
+
+    // Name of the measurement currently reflected in the Details panel (plainTextEditFormula
+    // included), or empty when no row is shown. A name rather than a row index because rows can
+    // shift (add/remove) between when this is recorded and when it's used. Needed because a
+    // mouse click on a different table row can update ui->tableWidget->currentRow() to the NEW
+    // row before plainTextEditFormula's FocusOut (and so CommitMValue(), see eventFilter()) is
+    // actually delivered -- by then, committing against currentRow() would target the wrong row
+    // entirely, silently discarding whatever was typed for the row she's leaving. See
+    // ShowNewMData().
+    QString                     m_editingMeasurementName;
+
     void                SetupMenu();
     void                InitWindow();
     void                initializeTable();
@@ -221,6 +248,10 @@ private:
     bool                MaybeSave();
 
     QTableWidgetItem   *AddCell(const QString &text, int row, int column, int aligment, bool ok = true);
+
+    void                SetRowHighlight(int row, const QColor &color);
+    void                MarkMeasurementSaved(const QString &name);
+    void                CommitMValueFor(const QString &measurementName, bool restoreSelection);
 
     Q_REQUIRED_RESULT QComboBox *SetGradationList(QLabel *label, const QStringList &list);
 

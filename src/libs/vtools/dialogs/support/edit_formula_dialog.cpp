@@ -250,14 +250,38 @@ void EditFormulaDialog::valueChanged(int row)
     }
     QTableWidgetItem *item = ui->tableWidget->item( row, NameColumn );
 
+    // currentCellChanged() can fire with no actual current item -- e.g. row == -1 right after
+    // every row gets hidden by filterVariables(), or during other selection churn -- in which
+    // case tableWidget->item() returns nullptr. Every branch below dereferences item, so bail
+    // out here instead of crashing the whole application on a null pointer.
+    if (item == nullptr)
+    {
+        ui->info_Label->setText("");
+        return;
+    }
+
+    // Below, each tab looks up its variable by name and immediately dereferences the result.
+    // getVariable<T>() throws VExceptionBadId for a name it can't find or can't cast, and
+    // DataVariables()->value(name) silently returns a null QSharedPointer for the same case --
+    // neither used to be guarded here, so a name that's momentarily stale (e.g. the table just
+    // got refiltered/rebuilt out from under this signal) would either throw uncaught out of a
+    // Qt slot or crash on a null dereference. Both are real crash mechanisms, not just
+    // theoretical -- guard the whole lookup instead of trusting the row is always still valid.
+    try
+    {
     switch (ui->menuTab_ListWidget->currentRow())
     {
         case VariableTab::Measurements:
         {
             const QString name = qApp->translateVariables()->VarFromUser(item->text());
             const QSharedPointer<MeasurementVariable> measurement = data->getVariable<MeasurementVariable>(name);
+            const QSharedPointer<VInternalVariable> value = data->DataVariables()->value(name);
+            if (value.isNull())
+            {
+                break;
+            }
 
-            setInfo(item->text(), *data->DataVariables()->value(name)->GetValue(),
+            setInfo(item->text(), *value->GetValue(),
                     UnitsToStr(qApp->patternUnit(), true), tr("Measurement"),
                     description(measurement), fullName(measurement));
             break;
@@ -267,7 +291,12 @@ void EditFormulaDialog::valueChanged(int row)
             const QString name = item->text();
             const QSharedPointer<CustomVariable> variable = data->getVariable<CustomVariable>(item->text());
             const QString desc = variable->GetDescription();
-            setInfo(name, *data->DataVariables()->value(item->text())->GetValue(),
+            const QSharedPointer<VInternalVariable> value = data->DataVariables()->value(item->text());
+            if (value.isNull())
+            {
+                break;
+            }
+            setInfo(name, *value->GetValue(),
                     UnitsToStr(qApp->patternUnit(), true), tr("Custom Variable"),
                     desc, "");
             break;
@@ -312,6 +341,12 @@ void EditFormulaDialog::valueChanged(int row)
             ui->info_Label->setText(item->toolTip());
             break;
         }
+    }
+    }
+    catch (const VExceptionBadId &exception)
+    {
+        Q_UNUSED(exception)
+        ui->info_Label->setText("");
     }
     return;
 }
