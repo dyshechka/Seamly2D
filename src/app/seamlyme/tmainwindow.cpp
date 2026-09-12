@@ -269,6 +269,17 @@ void TMainWindow::setPUnit(Unit unit)
 bool TMainWindow::LoadFile(const QString &path)
 {
     QString filename = path;
+
+	if (individualMeasurements != nullptr && CanReplaceCurrentWindow())
+	{
+		// See the identical reset in FileNew() -- this window has nothing worth keeping, so load
+		// the file here instead of opening a separate window for it.
+		delete individualMeasurements;
+		individualMeasurements = nullptr;
+		delete data;
+		data = nullptr;
+	}
+
 	if (individualMeasurements == nullptr)
 	{
 		if (!QFileInfo(filename).exists())
@@ -414,6 +425,17 @@ void TMainWindow::updateGroups()
 //---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::FileNew()
 {
+	if (individualMeasurements != nullptr && CanReplaceCurrentWindow())
+	{
+		// This window is still showing a brand new, completely untouched file (nothing typed,
+		// nothing saved) -- reset it and start over here instead of opening yet another window
+		// for what would otherwise be an identical blank file.
+		delete individualMeasurements;
+		individualMeasurements = nullptr;
+		delete data;
+		data = nullptr;
+	}
+
 	if (individualMeasurements == nullptr)
 	{
 		// The old "New measurement file" dialog (type/unit/base size/base
@@ -733,6 +755,53 @@ void TMainWindow::showEvent(QShowEvent *event)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::eventFilter(QObject *object, QEvent *event)
 {
+	if (object == ui->plainTextEditFormula && event->type() == QEvent::FocusOut)
+	{
+		if (ui->plainTextEditFormula->toPlainText().isEmpty())
+		{
+			// Nothing was typed after the placeholder zero was cleared on focus-in (or
+			// everything was deleted by hand) -- put the safe default back instead of leaving
+			// the field empty or showing an "Empty field" error.
+			ui->plainTextEditFormula->blockSignals(true);
+			ui->plainTextEditFormula->setPlainText(QStringLiteral("0"));
+			ui->plainTextEditFormula->blockSignals(false);
+		}
+
+		// Formula editing is considered "finished" once the field loses focus (the user
+		// clicked/tabbed away, selected another measurement, etc.) -- commit the pending
+		// edit and refresh the table now. See SaveMValue()/CommitMValue() for why this is
+		// deferred instead of happening on every keystroke.
+		CommitMValue();
+		// Fall through to QMainWindow::eventFilter() below so normal focus handling still
+		// happens for this widget.
+	}
+	else if (object == ui->plainTextEditFormula && event->type() == QEvent::FocusIn)
+	{
+		// A brand new/custom measurement starts with a placeholder formula of just "0". Clicking
+		// in to type a real formula used to leave that "0" in place, so the first keystrokes were
+		// silently glued onto it (e.g. "0acos(...)") instead of replacing it -- same issue as the
+		// Fx dialog already solves for via EditFormulaDialog::SetFormula(). Reuse the same
+		// "autoClearFx" setting here so the two stay consistent.
+		if (qApp->Settings()->autoClearFx())
+		{
+			const QString text = ui->plainTextEditFormula->toPlainText();
+			bool isDouble = false;
+			const double value = text.toDouble(&isDouble);
+			// Only the placeholder zero gets cleared here -- any other value already sitting in
+			// this field (including one just typed a moment ago) is left completely alone.
+			if (isDouble && qFuzzyIsNull(value))
+			{
+				// Silence textChanged for this programmatic clear -- otherwise SaveMValue() sees the
+				// now-empty field and immediately shows "Error. Empty field.", even though the user
+				// hasn't done anything yet. CommitMValue() shows that same message later, but only if
+				// they actually leave the field still empty -- see the comment there.
+				ui->plainTextEditFormula->blockSignals(true);
+				ui->plainTextEditFormula->clear();
+				ui->plainTextEditFormula->blockSignals(false);
+			}
+		}
+	}
+
 	if (QPlainTextEdit *plainTextEdit = qobject_cast<QPlainTextEdit *>(object))
 	{
 		if (event->type() == QEvent::KeyPress)
@@ -966,6 +1035,11 @@ void TMainWindow::printPages(QPrinter *printer)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::FileSave()
 {
+	// Make sure a formula edit still in progress (cursor never left the field, e.g. Ctrl+S
+	// pressed mid-edit) isn't silently dropped -- SaveMeasurements() below only writes what's
+	// already committed to the model.
+	CommitMValue();
+
 	if (curFile.isEmpty() || m_isReadOnly)
 	{
 		return FileSaveAs();
@@ -1063,6 +1137,10 @@ bool TMainWindow::FileSave()
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::FileSaveAs()
 {
+	// See the identical call in FileSave() -- flush any formula edit still in progress
+	// before writing the file.
+	CommitMValue();
+
 	QString dir;
     QString filters;
     QString suffix;
@@ -1959,6 +2037,13 @@ void TMainWindow::SaveMName(const QString &text)
 //---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::SaveMValue()
 {
+	// Live preview only: update the "calculated value" label as the user types, without
+	// touching the measurements model or rebuilding the whole table. On a large file with
+	// many cross-referencing formulas, doing the full commit (see CommitMValue()) on every
+	// keystroke made typing a formula lag by several seconds per letter. The actual commit
+	// now happens once editing is finished -- see CommitMValue(), called from an eventFilter()
+	// FocusOut on this field, and also flushed explicitly before saving the file (FileSave()/
+	// FileSaveAs()) so Ctrl+S can never miss an edit still in progress.
 	const int row = ui->tableWidget->currentRow();
 
 	if (row == -1)
@@ -1998,6 +2083,65 @@ void TMainWindow::SaveMValue()
 		meash = data->getVariable<MeasurementVariable>(nameField->data(Qt::UserRole).toString());
 	}
 
+	catch(const VExceptionBadId &exception)
+	{
+		qCWarning(tMainWindow, "%s\n\n%s\n\n%s",
+				  qUtf8Printable(tr("Can't find measurement '%1'.").arg(nameField->text())),
+				  qUtf8Printable(exception.ErrorMessage()), qUtf8Printable(exception.DetailedInformation()));
+		return;
+	}
+
+	// Just refresh the live preview label -- EvalFormula() only evaluates this one formula,
+	// it does not touch the rest of the table, so this stays cheap even on a big file.
+	EvalFormula(text, true, meash->GetData(), ui->labelCalculatedValue);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Commit the formula currently in the editor to the measurements model and refresh
+ * the whole table. This is the expensive half of what used to be SaveMValue() -- it
+ * recalculates every measurement (readMeasurements(), via RefreshData()) and rebuilds every
+ * row of the table (RefreshTable()), which is why it only runs once editing is finished
+ * rather than on every keystroke. Safe to call when nothing changed (e.g. from FileSave()
+ * "just in case") -- it compares against the stored formula first and does nothing if they
+ * already match.
+ */
+void TMainWindow::CommitMValue()
+{
+	const int row = ui->tableWidget->currentRow();
+
+	if (row == -1)
+	{
+		return;
+	}
+
+	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
+
+	QString text = ui->plainTextEditFormula->toPlainText();
+
+	QTableWidgetItem *formulaField = ui->tableWidget->item(row, ColumnFormula);
+	if (formulaField->text() == text)
+	{
+		return;
+	}
+
+	if (text.isEmpty())
+	{
+		// Only surface the "Empty field" error once the user actually leaves the field still
+		// empty -- not the moment it becomes empty (e.g. right after the auto-clear-on-focus in
+		// eventFilter(), which silences this same message on purpose so it doesn't flash up
+		// before they've had a chance to type anything).
+		const QString postfix = UnitsToStr(mUnit);//Show unit in dialog label (cm, mm or inch)
+		ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + tr("Empty field."));
+		return;
+	}
+
+	QSharedPointer<MeasurementVariable> meash;
+	try
+	{
+		// Translate to internal look.
+		meash = data->getVariable<MeasurementVariable>(nameField->data(Qt::UserRole).toString());
+	}
 	catch(const VExceptionBadId &exception)
 	{
 		qCWarning(tMainWindow, "%s\n\n%s\n\n%s",
@@ -2699,6 +2843,21 @@ void TMainWindow::RegisterNewKnitMeasurements()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+bool TMainWindow::CanReplaceCurrentWindow() const
+{
+	// Safe to silently reuse this window for a different file -- no prompt, no risk of losing
+	// anything -- only when it's still showing a brand new, completely untouched file: no name
+	// on disk yet, nothing in the table. Deliberately mirrors MaybeSave()'s own "don't ask if
+	// file was created without modifications" freebie rather than checking isWindowModified()
+	// directly -- FileNew() marks a fresh file as modified immediately (it has never been saved
+	// to disk), so that flag is already true right after pressing "New" even though there is
+	// nothing here actually worth keeping. Anything else (a loaded or edited file, even one
+	// that's already fully saved) keeps the existing, safer behavior of opening a separate
+	// window instead, same as it always has.
+	return individualMeasurements != nullptr && curFile.isEmpty() && ui->tableWidget->rowCount() == 0;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::MaybeSave()
 {
 	if (this->isWindowModified())
@@ -3165,14 +3324,11 @@ void TMainWindow::Open(const QString &dir, const QString &filter)
 
 	if (!filename.isEmpty())
 	{
-		if (individualMeasurements == nullptr)
-		{
-			LoadFile(filename);
-		}
-		else
-		{
-			qApp->newMainWindow()->LoadFile(filename);
-		}
+		// LoadFile() already decides for itself whether it's safe to reuse this window or whether
+		// it needs to open a separate one (see CanReplaceCurrentWindow()) -- doing that same check
+		// again here, ahead of it, used to short-circuit straight to a brand new window even when
+		// this one was empty and safe to reuse.
+		LoadFile(filename);
 	}
 }
 

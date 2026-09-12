@@ -379,6 +379,22 @@ void EditFormulaDialog::insertVariable(const QString &rotation)
     QTableWidgetItem *item = ui->tableWidget->currentItem();
     if (item != nullptr)
     {
+        if (qApp->Settings()->autoClearFx() && ui->plainTextEditFormula->toPlainText() == m_undoFormula)
+        {
+            // Nothing has been typed since the dialog opened -- if all that's here is the
+            // placeholder zero (a brand new/custom measurement with no formula set yet),
+            // replace it outright instead of inserting into/next to it, which used to
+            // produce an invalid formula like "0acos()" with no obvious cause. Any other
+            // value already sitting here -- including one typed in before this dialog was
+            // even opened -- is left completely alone.
+            bool isDouble = false;
+            const double value = m_undoFormula.toDouble(&isDouble);
+            if (isDouble && qFuzzyIsNull(value))
+            {
+                ui->plainTextEditFormula->clear();
+            }
+        }
+
         QTextCursor cursor = ui->plainTextEditFormula->textCursor();
         if (ui->menuTab_ListWidget->currentRow() == VariableTab::Functions)
         {
@@ -550,21 +566,11 @@ void EditFormulaDialog::SetFormula(const QString &value)
     m_formula = qApp->translateVariables()->FormulaToUser(value, qApp->Settings()->getOsSeparator());
     m_undoFormula = m_formula;
 
-    if (qApp->Settings()->autoClearFx())
-    {
-        bool isInt;
-        // Explicitly cast to void to suppress clang warnings
-        (void)m_formula.toInt(&isInt);
-
-        bool isDouble;
-        // Explicitly cast to void to suppress clang warnings
-        (void)m_formula.toDouble(&isDouble);
-
-        if(isInt || isDouble)
-        {
-            m_formula = QString();
-        }
-    }
+    // The placeholder value (typically just "0" for a brand new/custom measurement) is left
+    // visible here rather than cleared up front, so it stays there for reference while the user
+    // is still just looking through the tabs. See insertVariable(), which is where it actually
+    // gets replaced -- right when the user inserts something, which is the moment it would
+    // otherwise silently glue onto the placeholder (e.g. "0acos()").
     ui->plainTextEditFormula->setPlainText(m_formula);
     MoveCursorToEnd(ui->plainTextEditFormula);
 }

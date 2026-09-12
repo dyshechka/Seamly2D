@@ -156,6 +156,7 @@ private slots:
 
     void                SaveMName(const QString &text);
     void                SaveMValue();
+    void                CommitMValue();
     void                SaveMBaseValue(double value);
     void                SaveMSizeIncrease(double value);
     void                SaveMHeightIncrease(double value);
@@ -216,6 +217,7 @@ private:
     void                SetCurrentFile(const QString &fileName);
     bool                SaveMeasurements(const QString &fileName, QString &error);
 
+    bool                CanReplaceCurrentWindow() const;
     bool                MaybeSave();
 
     QTableWidgetItem   *AddCell(const QString &text, int row, int column, int aligment, bool ok = true);
