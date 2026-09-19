@@ -516,6 +516,9 @@ public:
     bool                 getShowAxisOrigin() const;
     void                 setShowAxisOrigin(bool value);
 
+    bool                 getShowMillimeterGrid() const;
+    void                 setShowMillimeterGrid(bool value);
+
     bool                 isWireframe() const;
     void                 setWireframe(bool value);
 

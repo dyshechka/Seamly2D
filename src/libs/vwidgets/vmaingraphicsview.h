@@ -98,6 +98,7 @@ class QGesture;
 class QGestureEvent;
 class QPanGesture;
 class QPinchGesture;
+class QPainter;
 
 class GraphicsViewZoom : public QObject
 {
@@ -176,6 +177,9 @@ public:
 
     void                  initScrollBars();
 
+    void                  setShowMillimeterGrid(bool value);
+    bool                  showMillimeterGrid() const;
+
 signals:
     /**
      * @brief mouseRelease help catch mouse release event.
@@ -203,6 +207,7 @@ protected:
     virtual void          mouseMoveEvent(QMouseEvent *event) override;
     virtual void          mouseReleaseEvent(QMouseEvent *event) override;
     virtual void          mouseDoubleClickEvent(QMouseEvent *event) override;
+    virtual void          drawBackground(QPainter *painter, const QRectF &rect) override;
 
     QSharedPointer<QCursor> curMagnifier;
 
@@ -223,6 +228,11 @@ private:
     QPoint                endPoint;
     QPoint                m_startPos;
     QPoint                cursorPos;
+    bool                  m_showMillimeterGrid;
+
+    void                  DrawMillimeterGrid(QPainter *painter, const QRectF &rect) const;
+    void                  DrawMillimeterGridLevel(QPainter *painter, const QRectF &rect, qreal stepScene,
+                                                  const QColor &color) const;
 };
 
 #endif // VMAINGRAPHICSVIEW_H

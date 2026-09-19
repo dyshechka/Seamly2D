@@ -169,6 +169,7 @@ const QString settingGraphicsViewPointNameSize           = QStringLiteral("graph
 const QString settingGraphicsViewGuiFontSize             = QStringLiteral("graphicsview/guiFontSize");
 const QString settingGraphicsViewHidePointNames          = QStringLiteral("graphicsview/hidePointNames");
 const QString settingGraphicsViewShowAxisOrigin          = QStringLiteral("graphicsview/showAxisOrigin");
+const QString settingGraphicsViewShowMillimeterGrid      = QStringLiteral("graphicsview/showMillimeterGrid");
 const QString settingGraphicsViewWireframe               = QStringLiteral("graphicsview/wireframe");
 const QString settingGraphicsViewShowControlPoints       = QStringLiteral("graphicsview/showControlPoints");
 const QString settingGraphicsViewShowAnchorPoints        = QStringLiteral("graphicsview/showAnchorPoints");
@@ -2323,6 +2324,18 @@ bool VCommonSettings::getShowAxisOrigin() const
 void VCommonSettings::setShowAxisOrigin(bool value)
 {
     setValue(settingGraphicsViewShowAxisOrigin, value);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool VCommonSettings::getShowMillimeterGrid() const
+{
+    return value(settingGraphicsViewShowMillimeterGrid, true).toBool();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void VCommonSettings::setShowMillimeterGrid(bool value)
+{
+    setValue(settingGraphicsViewShowMillimeterGrid, value);
 }
 
 //---------------------------------------------------------------------------------------------------------------------

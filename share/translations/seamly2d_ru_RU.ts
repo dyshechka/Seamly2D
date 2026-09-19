@@ -6417,6 +6417,14 @@ Do you want to save your changes?</source>
         <translation>Переключить начало оси (V, A)</translation>
     </message>
     <message>
+        <source>Millimeter Grid</source>
+        <translation>Миллиметровка</translation>
+    </message>
+    <message>
+        <source>Toggle Millimeter Grid (V, M)</source>
+        <translation>Показать или скрыть миллиметровку (V, M)</translation>
+    </message>
+    <message>
         <source>Wireframe Mode</source>
         <translation>Каркасный режим</translation>
     </message>
