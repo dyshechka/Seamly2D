@@ -327,11 +327,23 @@ qreal QmuParser::Rint(const qreal *a_afArg, int a_iArgc)
 {
     if (a_iArgc == 1)
     {
+        // Guard against NaN/Inf (e.g. from a 0/0 that shows up while the parser is
+        // still resolving unknown variables). Qt's qFloor() asserts on NaN input and
+        // would crash the whole application, so hand the non-finite value back
+        // instead of rounding it.
+        if (qIsNaN(a_afArg[0]) || qIsInf(a_afArg[0]))
+        {
+            return a_afArg[0];
+        }
         return qFloor(a_afArg[0] + 0.5);
     }
 
     if (a_iArgc == 2)
     {
+        if (qIsNaN(a_afArg[0]) || qIsInf(a_afArg[0]) || qIsNaN(a_afArg[1]) || qIsInf(a_afArg[1]))
+        {
+            return a_afArg[0];
+        }
         const qreal multiplier = qPow(10.0, qRound(a_afArg[1]));
         return qFloor(a_afArg[0] * multiplier + 0.5) / multiplier;
     }

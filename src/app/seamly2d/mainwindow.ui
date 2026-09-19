@@ -173,6 +173,7 @@
     <addaction name="toggleWireframe_Action"/>
     <addaction name="toggleControlPoints_Action"/>
     <addaction name="toggleAxisOrigin_Action"/>
+    <addaction name="toggleMillimeterGrid_Action"/>
     <addaction name="toggleSeamAllowances_Action"/>
     <addaction name="toggleGrainLines_Action"/>
     <addaction name="toggleLabels_Action"/>
@@ -2628,6 +2629,7 @@
    <addaction name="toggleWireframe_Action"/>
    <addaction name="toggleControlPoints_Action"/>
    <addaction name="toggleAxisOrigin_Action"/>
+   <addaction name="toggleMillimeterGrid_Action"/>
    <addaction name="toggleSeamAllowances_Action"/>
    <addaction name="toggleGrainLines_Action"/>
    <addaction name="toggleLabels_Action"/>
@@ -4587,6 +4589,30 @@
    </property>
    <property name="shortcut">
     <string notr="true">V, A</string>
+   </property>
+  </action>
+  <action name="toggleMillimeterGrid_Action">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="../../libs/vmisc/share/resources/icon.qrc">
+     <normaloff>:/icon/32x32/millimeter_grid.png</normaloff>:/icon/32x32/millimeter_grid.png</iconset>
+   </property>
+   <property name="text">
+    <string>Millimeter Grid</string>
+   </property>
+   <property name="toolTip">
+    <string>Toggle Millimeter Grid (V, M)</string>
+   </property>
+   <property name="shortcut">
+    <string notr="true">V, M</string>
    </property>
   </action>
   <action name="toggleWireframe_Action">

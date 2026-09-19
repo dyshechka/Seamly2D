@@ -74,6 +74,8 @@
 #include <QScreen>
 #include <QAbstractScrollArea>
 #include <QScreen>
+#include <QVarLengthArray>
+#include <QtCore/qmath.h>
 
 #include "../vmisc/logging.h"
 #include "../vmisc/def.h"
@@ -289,7 +291,15 @@ bool GraphicsViewZoom::eventFilter(QObject *object, QEvent *event)
         }
         else
         {
-            if (QApplication::keyboardModifiers() == Qt::ShiftModifier)
+            // A trackpad reports a genuine two-axis swipe (pixelDelta/angleDelta both
+            // populated) -- pick whichever axis carries the dominant motion so a left-right
+            // swipe scrolls horizontally on its own, without needing Shift. Shift still forces
+            // horizontal scrolling, for a plain mouse wheel that only ever reports a vertical
+            // delta.
+            const int absX = qMax(qAbs(wheel_event->pixelDelta().x()), qAbs(wheel_event->angleDelta().x()) / 8);
+            const int absY = qMax(qAbs(wheel_event->pixelDelta().y()), qAbs(wheel_event->angleDelta().y()) / 8);
+
+            if (QApplication::keyboardModifiers() == Qt::ShiftModifier || absX > absY)
             {
                 return startHorizontalScrollings(wheel_event);
             }
@@ -434,11 +444,15 @@ bool GraphicsViewZoom::startHorizontalScrollings(QWheelEvent *wheel_event)
 
     if (not numPixels.isNull())
     {
-        numSteps = numPixels.y();
+        // Prefer the event's own horizontal component (a real trackpad left-right swipe);
+        // fall back to .y() for the Shift+mouse-wheel convention, where a wheel that only
+        // ever reports a vertical delta is being reinterpreted as horizontal because Shift
+        // is held.
+        numSteps = (numPixels.x() != 0) ? numPixels.x() : numPixels.y();
     }
     else if (not numDegrees.isNull())
     {
-        numSteps = numDegrees.y() / 15;
+        numSteps = (numDegrees.x() != 0) ? numDegrees.x() / 15 : numDegrees.y() / 15;
     }
     else
     {
@@ -485,6 +499,7 @@ VMainGraphicsView::VMainGraphicsView(QWidget *parent)
     , endPoint(QPoint())
     , m_startPos(QPoint())
     , cursorPos(QPoint())
+    , m_showMillimeterGrid(true)
 {
     initScrollBars();
 
@@ -494,6 +509,146 @@ VMainGraphicsView::VMainGraphicsView(QWidget *parent)
     this->setInteractive(true);
 
     connect(zoom, &GraphicsViewZoom::zoomed, this, [this](){emit signalZoomScaleChanged(transform().m11());});
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void VMainGraphicsView::setShowMillimeterGrid(bool value)
+{
+    m_showMillimeterGrid = value;
+    viewport()->update();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool VMainGraphicsView::showMillimeterGrid() const
+{
+    return m_showMillimeterGrid;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+namespace
+{
+    // "Nice" grid steps, in millimeters, following the classic 1-2-5 ruler/CAD progression --
+    // this keeps the visible step at a round, easy-to-read number (never something like 3 mm or
+    // 70 mm) at any zoom level. Every 3rd entry is exactly x10 the one 3 back (0.5->5, 1->10,
+    // 2->20, ...), which is what lets the medium/coarse levels below be picked with a fixed
+    // index offset instead of hunting for the next "nice" multiple by hand.
+    static const qreal millimeterGridSteps[] =
+    {
+        0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0
+    };
+    static const int millimeterGridStepCount =
+        static_cast<int>(sizeof(millimeterGridSteps) / sizeof(millimeterGridSteps[0]));
+
+    // Below this on-screen spacing (in device-independent pixels) a level is considered too
+    // dense to read -- drawing it anyway is exactly the "solid grey smudge" the spec warns about.
+    constexpr qreal minGridSpacingPx = 6.0;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void VMainGraphicsView::drawBackground(QPainter *painter, const QRectF &rect)
+{
+    QGraphicsView::drawBackground(painter, rect);
+
+    if (!m_showMillimeterGrid)
+    {
+        return;
+    }
+
+    DrawMillimeterGrid(painter, rect);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief DrawMillimeterGrid draws the adaptive, multi-level "millimetrovka" background grid:
+ * a fine 1 mm level, a medium level 10x coarser, and a bold level 100x coarser, all drawn in
+ * real-world millimeters regardless of the pattern's display unit (mm/cm/inch). Which of the
+ * ladder's "nice" steps plays which role is picked fresh on every repaint from the view's
+ * current zoom (transform().m11()), so zooming out smoothly walks the base step up the ladder
+ * and hides the levels that would otherwise merge into an unreadable blur, exactly as the spec
+ * asks for -- there is no separate zoom-tracking needed, since drawBackground() is already
+ * re-invoked on every repaint and repaints already follow signalZoomScaleChanged().
+ */
+void VMainGraphicsView::DrawMillimeterGrid(QPainter *painter, const QRectF &rect) const
+{
+    const qreal scaleFactor = transform().m11();
+    if (scaleFactor <= 0)
+    {
+        return;
+    }
+
+    // Scene coordinates are always expressed in the app's fixed 96 DPI reference unit
+    // (see ToPixel()/UnitConvertor() in def.cpp), independent of the pattern's display unit --
+    // so this is the one conversion needed to know how many scene units make up 1 real mm.
+    const qreal mmToScene = UnitConvertor(1.0, Unit::Mm, Unit::Px);
+    const qreal pixelsPerMm = scaleFactor * mmToScene;
+    if (pixelsPerMm <= 0)
+    {
+        return;
+    }
+
+    int fineIndex = millimeterGridStepCount - 1;
+    for (int i = 0; i < millimeterGridStepCount; ++i)
+    {
+        if (millimeterGridSteps[i] * pixelsPerMm >= minGridSpacingPx)
+        {
+            fineIndex = i;
+            break;
+        }
+    }
+
+    const int mediumIndex = qMin(fineIndex + 3, millimeterGridStepCount - 1); // ~x10 the fine step
+    const int coarseIndex = qMin(fineIndex + 6, millimeterGridStepCount - 1); // ~x100 the fine step
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, false);
+
+    // Steel-blue, echoing the classic "миллиметровка" graph-paper look and the app's own blue
+    // accent color -- increasing opacity from the finest to the boldest level.
+    DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[fineIndex] * mmToScene, QColor(70, 130, 180, 40));
+    if (mediumIndex != fineIndex)
+    {
+        DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[mediumIndex] * mmToScene, QColor(70, 130, 180, 90));
+    }
+    if (coarseIndex != mediumIndex)
+    {
+        DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[coarseIndex] * mmToScene, QColor(70, 130, 180, 150));
+    }
+
+    painter->restore();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief DrawMillimeterGridLevel draws one level of the grid: parallel lines `stepScene` scene
+ * units apart, clipped to the currently visible `rect`, in a single batched QPainter::drawLines()
+ * call for performance (this runs on every repaint, including continuous zoom/pan).
+ */
+void VMainGraphicsView::DrawMillimeterGridLevel(QPainter *painter, const QRectF &rect, qreal stepScene,
+                                                 const QColor &color) const
+{
+    if (stepScene <= 0)
+    {
+        return;
+    }
+
+    QPen pen(color);
+    pen.setWidth(0); // cosmetic pen: always exactly 1 device pixel wide, regardless of zoom
+    painter->setPen(pen);
+
+    const qreal left = qFloor(rect.left() / stepScene) * stepScene;
+    const qreal top = qFloor(rect.top() / stepScene) * stepScene;
+
+    QVarLengthArray<QLineF, 256> lines;
+    for (qreal x = left; x < rect.right(); x += stepScene)
+    {
+        lines.append(QLineF(x, rect.top(), x, rect.bottom()));
+    }
+    for (qreal y = top; y < rect.bottom(); y += stepScene)
+    {
+        lines.append(QLineF(rect.left(), y, rect.right(), y));
+    }
+
+    painter->drawLines(lines.constData(), lines.size());
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -807,7 +962,9 @@ qreal VMainGraphicsView::MinScale()
 
     // Since Qt 6.8.3 has some rendering defects when zooming out too far,
     // causing excessive QPainter warnings and crashing, we limit the scale to 2%.
-    return 0.05;
+    // Additionally limited to 18% (roughly meter-scale) to keep the millimeter
+    // grid and pattern redraw responsive while zooming.
+    return 0.18;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -816,7 +973,8 @@ qreal VMainGraphicsView::MaxScale()
     const QRect screenRect(QGuiApplication::primaryScreen()->availableGeometry());
     const qreal screenSize = qMin(screenRect.width(), screenRect.height());
 
-    return maxSceneSize / screenSize;
+    // Cap zoom-in at 250% to keep the millimeter grid and pattern redraw responsive.
+    return qMin(maxSceneSize / screenSize, 2.5);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -884,11 +1042,19 @@ void VMainGraphicsView::initScrollBars()
 
         this->horizontalScrollBar()->setStyleSheet(horizontal_styleSheet);
         this->verticalScrollBar()->setStyleSheet(vertical_styleSheet);
+
+        // Force the bars to always be drawn instead of Qt's default "only if needed"
+        // behaviour, so they don't disappear when the scene currently fits the view.
+        this->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+        this->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     }
     else
     {
         this->horizontalScrollBar()->setStyleSheet("QScrollBar {height: 0px;}");
         this->verticalScrollBar()->setStyleSheet("QScrollBar {width: 0px;}");
+
+        this->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        this->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     }
 
     this->horizontalScrollBar()->setSingleStep(1);
