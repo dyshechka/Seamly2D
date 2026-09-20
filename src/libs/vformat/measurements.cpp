@@ -373,11 +373,22 @@ void MeasurementDoc::readMeasurements() const
             // organizational -- absent on older files, which is exactly "not a section" (false).
             const bool isSection = getParameterBool(dom, AttrIsSection, falseStr);
 
+            if (isSection)
+            {
+                // A divider has no real value to hold, so force it to an obviously-wrong
+                // sentinel instead of leaving whatever its formula/value happened to be before
+                // it was turned into a divider (which could easily look like a plausible real
+                // number). This is a last-resort floor: TMainWindow::FormulaReferencesSection()
+                // is what actually stops a formula from using a divider, but if one ever slips
+                // through anyway, -100000 is impossible to mistake for a legitimate result.
+                value = -100000;
+            }
+
             tempMeash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(tempData.data(), static_cast<quint32>(i), name,
                                                                       value, formula, ok, fullName, description, QString(),
                                                                       isSection));
 
-            value = UnitConvertor(value, measurementUnits(), *data->GetPatternUnit());
+            value = isSection ? -100000 : UnitConvertor(value, measurementUnits(), *data->GetPatternUnit());
             meash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(data, static_cast<quint32>(i), name, value, formula,
                                                                   ok, fullName, description, QString(), isSection));
         }

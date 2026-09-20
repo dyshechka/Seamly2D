@@ -103,7 +103,10 @@ QRectF pointRect(qreal radius)
 //---------------------------------------------------------------------------------------------------------------------
 qreal scaledRadius(qreal scale)
 {
-    qDebug() << "scaledRadius() " << scale;
+    // Note: this runs once per point/control-point graphics item on every scale change --
+    // including scene (re)population on file open and every zoom step -- so it must stay
+    // free of logging or other per-call overhead. A leftover qDebug() here previously fired
+    // on every call and was a measurable source of lag on large patterns; do not reintroduce it.
     qreal scaledRadius = defPointRadiusPixel;
     if (scale > 1)
     {
@@ -131,7 +134,7 @@ void scaleRectSize(QGraphicsRectItem *item, qreal scale)
 //---------------------------------------------------------------------------------------------------------------------
 qreal scaleWidth(qreal width, qreal scale)
 {
-    qDebug() << "scaledWidth() " << "width: " << width << "scale: "<< scale;
+    // See the note in scaledRadius() above -- same hot path, same reason not to log here.
     if (scale > 1)
     {
         width = qMax(0.01, width/scale);

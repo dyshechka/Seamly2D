@@ -151,6 +151,11 @@ private:
     qreal                 verticalOffset;
     qreal                 scaleFactor;
     qreal                 currentScaleFactor;
+    /** @brief m_pinchInProgress true between a pinch gesture's start and finish/cancel --
+     *  while it's true, incidental wheel-event drift that a real-world pinch's finger
+     *  motion often also produces is ignored instead of starting a scroll animation that
+     *  would fight (and visually mask) the pinch's own zoom. See eventFilter(). */
+    bool                  m_pinchInProgress;
 };
 
 /**
@@ -232,6 +237,7 @@ private:
 
     void                  DrawMillimeterGrid(QPainter *painter, const QRectF &rect) const;
     void                  DrawMillimeterGridLevel(QPainter *painter, const QRectF &rect, qreal stepScene,
+                                                  const qreal *excludeStepsScene, int excludeStepsCount,
                                                   const QColor &color) const;
 };
 

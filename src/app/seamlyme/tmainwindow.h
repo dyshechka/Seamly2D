@@ -266,6 +266,14 @@ private:
     void                RegisterNewKnitMeasurements();
 
     bool                EvalFormula(const QString &formula, bool fromUser, VContainer *data, QLabel *label);
+    // Does `internalFormula` (a formula in internal/untranslated form, e.g. meash->GetFormula())
+    // refer to a measurement that's marked as a section divider (checkBoxIsSection/IsSection())?
+    // A divider has no real value -- it's purely organizational -- so using it in a calculation
+    // is always a mistake, even though the Calculator has no trouble evaluating it (a divider
+    // row is still stored as a variable with a numeric value -- see
+    // MeasurementDoc::readMeasurements()). On a true result, *sectionName (if given) is set to
+    // the divider's user-facing (translated) name for use in an error message. See RefreshTable().
+    bool                FormulaReferencesSection(const QString &internalFormula, QString *sectionName = nullptr) const;
     QString             getMeasurementNumber(const QString &name);
     void                ShowMDiagram(QSharedPointer<MeasurementVariable> meash);
 

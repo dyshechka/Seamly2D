@@ -87,8 +87,14 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
+#include <QFont>
 #include <QPainter>
+#include <QPen>
 #include <QPixmap>
+#include <QPointF>
+#include <QPolygonF>
+#include <QRectF>
+#include <QStyleFactory>
 #include <QPrinter>
 #include <QPrintPreviewDialog>
 #include <QProcess>
@@ -121,19 +127,78 @@ static const int maxFormulaColumnWidth = 260;
 
 // Row-highlight colors for the measurements table (Individual/single-size files only -- see
 // RefreshTable(), SetRowHighlight()). Priority when more than one might apply to the same row
-// is orange, then pink, then blue (a section-divider row is exclusively blue and never reaches
-// the orange/pink checks at all -- see meash->IsSection() in RefreshTable()/ShowNewMData()):
-//   blue   -- this row is a section divider (checkBoxIsSection), not a real measurement -- it
-//             has no formula and is never used in calculations. Purely organizational, so a
-//             long measurement list can be split into logical groups.
-//   pink   -- a measurement this formula uses was just edited elsewhere; the result here may
-//             have quietly changed. Worth a look, not urgent. Cleared once the row is viewed
-//             or its own formula is (re)saved -- see MarkMeasurementSaved()/ShowNewMData().
-//   orange -- the formula currently sitting in this row is unsaved and invalid (a draft -- see
-//             CommitMValue()). Needs fixing before it's lost.
+// is problem, then reminder, then blue (a section-divider row is exclusively blue and never
+// reaches the problem/reminder checks at all -- see meash->IsSection() in
+// RefreshTable()/ShowNewMData()). Colors follow the usual warning-color association -- orange
+// reads as "worth a look", pink/red reads as "something's actually wrong" -- rather than the
+// color names matching the QColor variable names, which is why these are named by role, not by
+// hue:
+//   blue     -- this row is a section divider (checkBoxIsSection), not a real measurement -- it
+//               has no formula and is never used in calculations. Purely organizational, so a
+//               long measurement list can be split into logical groups.
+//   reminder -- (orange) a measurement this formula uses was just edited elsewhere; the result
+//               here may have quietly changed. Worth a look, not urgent -- the formula itself is
+//               still fine. Also gets a small warning icon in front of the Formula column's text
+//               (display only -- see ReminderRowIcon() -- never written into the formula itself
+//               or the edit field, so it can't end up saved or interfere with comparing against
+//               what's currently typed). Cleared once the row is viewed or its own formula is
+//               (re)saved -- see MarkMeasurementSaved()/ShowNewMData().
+//   problem  -- (pink) the formula currently sitting in this row is unsaved and invalid (a
+//               draft -- see CommitMValue()), or it references a section divider, which has no
+//               real value to use. Needs fixing.
 static const QColor rowHighlightBlue(0xca, 0xda, 0xf8);
-static const QColor rowHighlightPink(0xf4, 0xcc, 0xcc);
-static const QColor rowHighlightOrange(0xfc, 0xe5, 0xcd);
+static const QColor rowHighlightReminder(0xfc, 0xe5, 0xcd); // orange
+static const QColor rowHighlightProblem(0xf4, 0xcc, 0xcc);  // pink
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief ReminderRowIcon a small warning-triangle icon shown in front of the Formula column's
+ * text for a "reminder" (rowHighlightReminder) row -- see the comment above rowHighlightBlue.
+ * Built once into a static QIcon and reused -- RefreshTable() rebuilds every row on every
+ * change, so this runs often enough to be worth not re-rendering a glyph-to-pixmap every time.
+ * Deliberately an icon (QTableWidgetItem::setIcon()), not text prepended to the cell's own
+ * string: that string doubles as the "what's actually saved" reference CommitMValueFor() and
+ * Fx() compare the edit field against, so anything added there would end up either stuck in the
+ * saved formula or breaking that comparison.
+ */
+static const QIcon &ReminderRowIcon()
+{
+	static const QIcon icon = []()
+	{
+		// Drawn as plain vector shapes (a filled triangle plus an exclamation mark made of a
+		// small rectangle and a dot) -- deliberately NOT emoji text ("\u26A0\uFE0F" via
+		// QPainter::drawText(), which is what this used to do). That emoji version crashed:
+		// on this Mac's macOS/Qt combination, Qt renders that particular glyph through
+		// CoreText, which loads its color bitmap ("sbix" table, used for full-color emoji)
+		// via ImageIO's PNG decoder -- and that decoder crashed with SIGBUS the first time
+		// this icon was built (see the crash report Марта sent: SIGBUS inside
+		// IIOReadPlugin::callInitialize(), reached from QPainter::drawText() ->
+		// CTFontDrawGlyphs() -> TCGImageData::TCGImageData(..., TsbixContext const&, ...),
+		// called from right here via RefreshTable()). A hand-drawn shape needs no font or
+		// color-glyph rendering at all, so it can't hit that code path again.
+		QPixmap pixmap(16, 16);
+		pixmap.fill(Qt::transparent);
+
+		QPainter painter(&pixmap);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+
+		QPolygonF triangle;
+		triangle << QPointF(8.0, 1.5) << QPointF(15.0, 14.5) << QPointF(1.0, 14.5);
+
+		painter.setPen(QPen(QColor(0x8a, 0x5a, 0x00), 1.2));
+		painter.setBrush(QColor(0xf5, 0xa6, 0x23));
+		painter.drawPolygon(triangle);
+
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0x3a, 0x2a, 0x00));
+		painter.drawRect(QRectF(7.3, 5.5, 1.4, 5.0));     // the exclamation mark's stroke
+		painter.drawEllipse(QRectF(7.3, 11.5, 1.4, 1.4)); // its dot
+
+		painter.end();
+		return QIcon(pixmap);
+	}();
+	return icon;
+}
 
 //---------------------------------------------------------------------------------------------------------------------
 TMainWindow::TMainWindow(QWidget *parent)
@@ -189,6 +254,19 @@ TMainWindow::TMainWindow(QWidget *parent)
 
     // Заставляем строки автоматически расширяться по высоте под объем текста
     ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+
+    // Force this one table onto the cross-platform Fusion style instead of the native macOS
+    // one it would otherwise inherit from the app. On this Mac, the native style paints each
+    // row's background itself (including its own zebra-striping) and doesn't reliably respect a
+    // per-item Qt::BackgroundRole -- confirmed directly: turning tableWidget's own
+    // "alternatingRowColors" property off (see the .ui file and SetRowHighlight()) made no
+    // difference, a "reminder" row still came out plain gray instead of orange even though its
+    // warning icon (a separate paint step) showed up fine. Fusion paints entirely through Qt's
+    // own item-view delegate rather than native row drawing, so item->setBackground() (used for
+    // the blue/reminder/problem row highlighting, see SetRowHighlight()) is respected reliably.
+    // Scoped to just this widget -- setStyle() here doesn't touch the look of the rest of the
+    // window.
+    ui->tableWidget->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
 	ui->mainToolBar->setContextMenuPolicy(Qt::PreventContextMenu);
 	ui->toolBarGradation->setContextMenuPolicy(Qt::PreventContextMenu);
@@ -478,6 +556,12 @@ void TMainWindow::FileNew()
 		InitWindow();
 
 		MeasurementGUI();
+
+		// A brand new file used to come up with an empty table -- nothing to click on, nothing
+		// to show in the details panel below. Give her a first row right away, the same as
+		// pressing the "Custom" add button herself, so "New" always produces something she can
+		// immediately start filling in instead of a blank screen.
+		AddCustom();
 	}
 	else
 	{
@@ -1467,7 +1551,7 @@ void TMainWindow::Remove()
 	const QString removedName = nameField->data(Qt::UserRole).toString();
 	individualMeasurements->Remove(removedName);
 
-	// A deleted measurement's leftover draft/pink-flag bookkeeping would otherwise sit in these
+	// A deleted measurement's leftover draft/reminder-flag bookkeeping would otherwise sit in these
 	// maps forever (they're only ever cleared by name, on resave/view -- see MarkMeasurementSaved()
 	// and ShowNewMData()), ready to wrongly apply to some future, unrelated measurement that
 	// happens to get the same name later. m_usedByMeasurement doesn't need this: RefreshTable()
@@ -1674,7 +1758,41 @@ void TMainWindow::Fx()
 	{
 		// Because of the bug need to take QTableWidgetItem twice time. Previous update "killed" the pointer.
 		const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
-		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), dialog->GetFormula());
+		const QString newFormula = dialog->GetFormula();
+
+		// The list above already strips section-divider rows out of what this dialog offers to
+		// pick from, but nothing stops her from typing a name by hand instead -- and the result
+		// (e.g. "Тест + Тест") is otherwise perfectly valid math, so the dialog's own validation
+		// has no reason to refuse it. Same check as CommitMValueFor()/RefreshTable(): refuse to
+		// commit it here too, keep it as a problem (pink) draft, and explain why, instead of silently
+		// accepting a meaningless result.
+		QString sectionRefName;
+		if (FormulaReferencesSection(newFormula, &sectionRefName))
+		{
+			const QString errPostfix = UnitsToStr(mUnit);
+			const QString message = tr("This formula uses \"%1\", which is a section divider "
+										"and can't be used in calculations.").arg(sectionRefName);
+			ui->labelCalculatedValue->setText(tr("Error") + " (" + errPostfix + "). " + message);
+			ui->labelCalculatedValue->setToolTip(message);
+
+			QString userFormula;
+			try
+			{
+				userFormula = qApp->translateVariables()->FormulaToUser(newFormula, qApp->Settings()->getOsSeparator());
+			}
+			catch (qmu::QmuParserError &error)
+			{
+				Q_UNUSED(error)
+				userFormula = newFormula;
+			}
+			m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), userFormula);
+			SetRowHighlight(row, rowHighlightProblem);
+
+			delete dialog;
+			return;
+		}
+
+		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), newFormula);
 		MarkMeasurementSaved(nameField->data(Qt::UserRole).toString());
 
 		MeasurementsWasSaved(false);
@@ -2047,6 +2165,25 @@ void TMainWindow::ShowNewMData(bool fresh)
 				else
 				{
 					EvalFormula(meash->GetFormula(), false, meash->GetData(), ui->labelCalculatedValue);
+
+					// EvalFormula() above only catches parser failures and infinite/NaN results --
+					// a formula that refers to a section divider (checkBoxIsSection) parses and
+					// computes just fine on its own (the divider row still holds a numeric value,
+					// see MeasurementDoc::readMeasurements()), so it needs this separate check, the
+					// same one RefreshTable() uses for the row's problem highlight/red value below.
+					// Without this, the Value field here would silently show a normal-looking
+					// number while the table row is flagged as an error, with nothing to explain
+					// why.
+					QString sectionRefName;
+					if (FormulaReferencesSection(meash->GetFormula(), &sectionRefName))
+					{
+						const QString postfix = UnitsToStr(pUnit);
+						const QString message = tr("This formula uses \"%1\", which is a section "
+													"divider and can't be used in calculations.")
+													.arg(sectionRefName);
+						ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+						ui->labelCalculatedValue->setToolTip(message);
+					}
 				}
 
 				ui->plainTextEditFormula->blockSignals(true);
@@ -2075,17 +2212,33 @@ void TMainWindow::ShowNewMData(bool fresh)
 				ui->plainTextEditFormula->blockSignals(false);
 
 				// Viewing this row counts as having checked it -- clear any pending "something
-				// this depends on just changed" highlight now instead of waiting for the next
-				// full refresh. See the priority comment above rowHighlightBlue: a still-unsaved
-				// draft keeps its orange regardless.
+				// this depends on just changed" flag now instead of waiting for the next full
+				// refresh. See the priority comment above rowHighlightBlue: a still-unsaved draft
+				// keeps its problem highlight regardless. Otherwise, if the formula is still
+				// broken after this look (e.g. it references a name that hasn't been fixed up
+				// yet), upgrade the row from reminder to problem -- she's seen it, but it still
+				// needs attention -- rather than clearing the highlight as if everything were
+				// fine.
 				if (m_affectedMeasurements.remove(measurementName))
 				{
 					QColor rowColor;
-					if (hasDraft)
+					if (hasDraft || !meash->IsFormulaOk())
 					{
-						rowColor = rowHighlightOrange;
+						rowColor = rowHighlightProblem;
 					}
 					SetRowHighlight(ui->tableWidget->currentRow(), rowColor);
+
+					// The reminder icon (see ReminderRowIcon()) lives on the Formula item as its
+					// own Qt::DecorationRole, separate from the row's background color set just
+					// above -- clearing the highlight doesn't clear it, so without this line it
+					// would keep showing even once the row stops being flagged, whether it
+					// settles back to plain (rowColor left invalid) or turns into a problem row
+					// (rowColor = rowHighlightProblem, which gets its own red error indicator
+					// elsewhere and was never given this icon to begin with -- see RefreshTable()).
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(ui->tableWidget->currentRow(), ColumnFormula))
+					{
+						formulaItem->setIcon(QIcon());
+					}
 				}
 			}
 		}
@@ -2366,17 +2519,48 @@ void TMainWindow::CommitMValueFor(const QString &measurementName, bool restoreSe
 		// corrupt the pattern) -- but don't just drop it either. Keep it as a draft so switching
 		// to another row and back doesn't silently replace what she typed with the last value
 		// that did save -- see ShowNewMData(), which checks this map before falling back to
-		// meash->GetFormula(). Recolor this row (orange) right away rather than waiting for a
+		// meash->GetFormula(). Recolor this row (problem/pink) right away rather than waiting for a
 		// full refresh, which would also undo the point of the CommitMValue/RefreshTable split.
 		m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), text);
-		SetRowHighlight(row, rowHighlightOrange);
+		SetRowHighlight(row, rowHighlightProblem);
+		return;
+	}
+
+	QString internalFormula;
+	try
+	{
+		internalFormula = qApp->translateVariables()->FormulaFromUser(text, qApp->Settings()->getOsSeparator());
+	}
+	catch (qmu::QmuParserError &error) // Just in case something bad will happen
+	{
+		Q_UNUSED(error)
+		return;
+	}
+
+	// A formula that parses and computes fine (EvalFormula() above passed) can still be wrong in
+	// a way EvalFormula() has no way to see: it may refer to a measurement that's a section
+	// divider (checkBoxIsSection), which has no real value to use -- see
+	// FormulaReferencesSection(). Catch that here too, before it's accepted as a committed
+	// result, with the same "keep as a problem draft, don't commit" treatment as an outright
+	// EvalFormula() failure above -- otherwise a formula like "Тест + Тест" (both operands the
+	// same section-divider measurement) sails through as a normal-looking committed value.
+	QString sectionRefName;
+	if (FormulaReferencesSection(internalFormula, &sectionRefName))
+	{
+		const QString postfix = UnitsToStr(mUnit);
+		const QString message = tr("This formula uses \"%1\", which is a section divider and "
+									"can't be used in calculations.").arg(sectionRefName);
+		ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+		ui->labelCalculatedValue->setToolTip(message);
+
+		m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), text);
+		SetRowHighlight(row, rowHighlightProblem);
 		return;
 	}
 
 	try
 	{
-		const QString formula = qApp->translateVariables()->FormulaFromUser(text, qApp->Settings()->getOsSeparator());
-		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), formula);
+		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), internalFormula);
 		MarkMeasurementSaved(nameField->data(Qt::UserRole).toString());
 	}
 	catch (qmu::QmuParserError &error) // Just in case something bad will happen
@@ -3229,15 +3413,37 @@ QTableWidgetItem *TMainWindow::AddCell(const QString &text, int row, int column,
 
 //---------------------------------------------------------------------------------------------------------------------
 /**
- * @brief Paint every cell in a table row with the same background color, or clear it back to
- * the default (alternating-row) shading with an invalid QColor. Used for the row-level
- * highlighting described above AddCell() -- setForeground() there colors one cell's text on a
- * value error, this colors a whole row's background for the "has a formula" / "check this" /
- * "unsaved draft" states instead.
+ * @brief Paint every cell in a table row with the same background color, or, with an invalid
+ * QColor, with the plain alternating-row shading a row would normally get on its own. Used for
+ * the row-level highlighting described above AddCell() -- setForeground() there colors one
+ * cell's text on a value error, this colors a whole row's background for the "has a formula" /
+ * "check this" / "unsaved draft" states instead.
+ *
+ * tableWidget's own "alternatingRowColors" property is OFF (see the .ui file) and every row's
+ * shading is applied by hand here instead, including the plain, unhighlighted rows -- on this
+ * Mac's native style, the built-in alternating shading is painted directly by the view and
+ * doesn't reliably respect a per-item Qt::BackgroundRole set below it: a "reminder" row that
+ * landed on what would have been an alternate row kept its plain alternate-row gray instead of
+ * turning orange (the warning icon still showed, since that's a separate, unaffected paint
+ * step). Painting every row's background here, always, sidesteps that rather than depending on
+ * two different systems agreeing on top of each other.
  */
 void TMainWindow::SetRowHighlight(int row, const QColor &color)
 {
-	const QBrush brush = color.isValid() ? QBrush(color) : QBrush();
+	QBrush brush;
+	if (color.isValid())
+	{
+		brush = QBrush(color);
+	}
+	else
+	{
+		// Same odd/even shading alternatingRowColors would have given this row, taken from the
+		// palette (so it still follows the system's light/dark appearance) rather than a
+		// hard-coded gray.
+		const QPalette::ColorRole role = (row % 2 != 0) ? QPalette::AlternateBase : QPalette::Base;
+		brush = QBrush(ui->tableWidget->palette().color(role));
+	}
+
 	for (int column = 0; column < ui->tableWidget->columnCount(); ++column)
 	{
 		if (QTableWidgetItem *cellItem = ui->tableWidget->item(row, column))
@@ -3252,9 +3458,9 @@ void TMainWindow::SetRowHighlight(int row, const QColor &color)
  * @brief Update row-highlight bookkeeping after a measurement's formula was actually committed
  * to the model (individualMeasurements->SetMValue() succeeded) -- see CommitMValue() and Fx().
  * Anyone whose formula references this measurement's name may now compute to a different
- * result, so their rows get flagged (pink, via m_affectedMeasurements) until she looks at them
- * or resaves them -- see ShowNewMData() and the orange/pink priority comment above
- * rowHighlightBlue. This measurement's own pink flag and any leftover invalid-formula draft are
+ * result, so their rows get flagged (reminder/orange, via m_affectedMeasurements) until she
+ * looks at them or resaves them -- see ShowNewMData() and the problem/reminder priority comment
+ * above rowHighlightBlue. This measurement's own reminder flag and any leftover invalid-formula draft are
  * cleared, since what's now in the model is exactly what was just typed and it evaluated fine.
  */
 void TMainWindow::MarkMeasurementSaved(const QString &name)
@@ -3397,7 +3603,7 @@ void TMainWindow::RefreshTable(bool freshCall)
 												: qApp->translateVariables()->Description(meash->GetName());
 			AddCell(description, currentRow, ColumnDescription, Qt::AlignVCenter); // description
 
-			// Row highlighting: figure out which of blue/pink/orange (if any) this row gets --
+			// Row highlighting: figure out which of blue/reminder/problem (if any) this row gets --
 			// see the comment above rowHighlightBlue for what each means and the priority order.
 			// A section-divider row (meash->IsSection()) is always blue and skips everything
 			// else below -- it has no real formula, so it's never a dependency of anything and
@@ -3412,7 +3618,22 @@ void TMainWindow::RefreshTable(bool freshCall)
 			{
 				const QString internalFormula = meash->GetFormula();
 
-				if (!internalFormula.isEmpty())
+				// A formula that refers to a section-divider measurement (checkBoxIsSection) is
+				// always wrong -- a divider has no real value, it's purely organizational -- even
+				// though the Calculator itself has no trouble evaluating it (see
+				// FormulaReferencesSection()). Detected in the same usedNames pass used just
+				// below to build m_usedByMeasurement, so the formula is only parsed once.
+				bool referencesSection = false;
+				QString sectionRefName;
+
+				// Only re-parse a formula that the data layer itself already parsed
+				// successfully (meash->IsFormulaOk(), set by readMeasurements()/EvalFormula() in
+				// measurements.cpp). A formula that's currently incomplete or malformed on disk
+				// (e.g. something left mid-edit) already gets its own red error indicator further
+				// down and doesn't need to show up in anyone else's dependency list -- and asking
+				// the parser to tokenize a broken formula a second time here, for every table
+				// refresh, is worth avoiding rather than relying on this being harmless.
+				if (!internalFormula.isEmpty() && meash->IsFormulaOk())
 				{
 					try
 					{
@@ -3421,6 +3642,16 @@ void TMainWindow::RefreshTable(bool freshCall)
 						for (const QString &usedName : usedNames)
 						{
 							m_usedByMeasurement[usedName].append(meash->GetName());
+
+							if (!referencesSection)
+							{
+								const QSharedPointer<MeasurementVariable> used = table.value(usedName);
+								if (!used.isNull() && used->IsSection())
+								{
+									referencesSection = true;
+									sectionRefName = qApp->translateVariables()->MToUser(usedName);
+								}
+							}
 						}
 					}
 					catch (qmu::QmuParserError &error)
@@ -3430,18 +3661,64 @@ void TMainWindow::RefreshTable(bool freshCall)
 						// flags that something is wrong with this row.
 						Q_UNUSED(error)
 					}
+					catch (...)
+					{
+						// Belt and suspenders: this is a table-refresh convenience scan, not
+						// essential to showing the row itself, so whatever this formula did to
+						// get here, it must not be allowed to take the whole table refresh (and
+						// the app) down with it.
+					}
 				}
 
 				QColor rowColor;
-				if (m_formulaDrafts.contains(meash->GetName()))
+				if (m_formulaDrafts.contains(meash->GetName()) || referencesSection)
 				{
-					rowColor = rowHighlightOrange;
+					rowColor = rowHighlightProblem;
 				}
 				else if (m_affectedMeasurements.contains(meash->GetName()))
 				{
-					rowColor = rowHighlightPink;
+					rowColor = rowHighlightReminder;
 				}
 				SetRowHighlight(currentRow, rowColor);
+
+				if (referencesSection)
+				{
+					const QString message = tr("This formula uses \"%1\", which is a section "
+												"divider and can't be used in calculations.")
+												.arg(sectionRefName);
+					if (QTableWidgetItem *calcItem = ui->tableWidget->item(currentRow, ColumnCalcValue))
+					{
+						QBrush brush = calcItem->foreground();
+						brush.setColor(Qt::red);
+						calcItem->setForeground(brush);
+						calcItem->setToolTip(message);
+					}
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(currentRow, ColumnFormula))
+					{
+						formulaItem->setToolTip(message);
+					}
+				}
+				else if (rowColor == rowHighlightReminder)
+				{
+					// Orange here isn't an error -- the value is still correct -- it's a "you
+					// may want to take another look" reminder because a measurement this formula
+					// uses was just changed elsewhere. Say so explicitly (tooltip) and mark it
+					// visually (a small warning icon in front of the formula text, see
+					// ReminderRowIcon()) so a colored row doesn't read as broken. Clicking into
+					// the row clears it (see ShowNewMData()).
+					const QString message = tr("A measurement this formula uses was just changed. "
+												"Open this row to confirm the result is still what "
+												"you expect -- doing so clears this reminder.");
+					if (QTableWidgetItem *nameItem = ui->tableWidget->item(currentRow, ColumnName))
+					{
+						nameItem->setToolTip(message);
+					}
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(currentRow, ColumnFormula))
+					{
+						formulaItem->setToolTip(message);
+						formulaItem->setIcon(ReminderRowIcon());
+					}
+				}
 			}
 		}
 		else
@@ -3478,6 +3755,13 @@ void TMainWindow::RefreshTable(bool freshCall)
 			const QString description = meash->isCustom() ? meash->GetDescription()
 												: qApp->translateVariables()->Description(meash->GetName());
 			AddCell(description, currentRow, ColumnDescription, Qt::AlignVCenter); // description
+
+			// Multisize rows don't get the reminder/problem/section highlighting above (that's
+			// Individual-file-only, see the comment near rowHighlightBlue), but they still need
+			// SOME background -- alternatingRowColors is off for this whole table now (see
+			// SetRowHighlight()), so without this every row here would come out plain instead of
+			// alternating.
+			SetRowHighlight(currentRow, QColor());
 		}
 	}
 
@@ -3731,6 +4015,48 @@ bool TMainWindow::EvalFormula(const QString &formula, bool fromUser, VContainer 
 			return false;
 		}
 	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool TMainWindow::FormulaReferencesSection(const QString &internalFormula, QString *sectionName) const
+{
+	if (internalFormula.isEmpty())
+	{
+		return false;
+	}
+
+	try
+	{
+		QScopedPointer<Calculator> depCal(new Calculator());
+		const QStringList usedNames = depCal->GetUsedVariables(internalFormula);
+		const QMap<QString, QSharedPointer<MeasurementVariable> > table = data->DataMeasurements();
+		for (const QString &usedName : usedNames)
+		{
+			const QSharedPointer<MeasurementVariable> used = table.value(usedName);
+			if (!used.isNull() && used->IsSection())
+			{
+				if (sectionName != nullptr)
+				{
+					*sectionName = qApp->translateVariables()->MToUser(usedName);
+				}
+				return true;
+			}
+		}
+	}
+	catch (qmu::QmuParserError &error)
+	{
+		// Can't even tokenize this formula right now -- not our concern here, the existing
+		// red error highlight on the calculated-value cell already flags it.
+		Q_UNUSED(error)
+	}
+	catch (...)
+	{
+		// Belt and suspenders, same reasoning as the identical catch in RefreshTable(): this is
+		// a supplementary check, not essential to showing or committing the row, so it must not
+		// bring the app down no matter what this formula does to the parser.
+	}
+
+	return false;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
