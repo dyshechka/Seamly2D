@@ -2535,7 +2535,12 @@ QString VCommonSettings::getStr(QString key, const QString &defaultString) const
 
 bool VCommonSettings::autoClearFx() const
 {
-    return value(settingGraphicsAutoClearFx, false).toBool();
+    // Defaults to on: leaving a formula field's placeholder "0" in place made it very easy to
+    // start typing a real formula right after it (e.g. clicking Fx and inserting a function),
+    // producing an invalid formula like "0acos()" with no obvious cause. Existing users who
+    // already set this explicitly (on or off) keep their own choice -- this only changes the
+    // out-of-the-box default.
+    return value(settingGraphicsAutoClearFx, true).toBool();
 }
 
 void VCommonSettings::setAutoClearFx(bool value)

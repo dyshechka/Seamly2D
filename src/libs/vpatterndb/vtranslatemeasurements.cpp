@@ -56,6 +56,7 @@
 
 #include "../qmuparser/qmutranslation.h"
 #include "measurements_def.h"
+#include "knit_measurements.h"
 
 /**
  * @brief Constructs a VTranslateMeasurements object.
@@ -309,6 +310,29 @@ void VTranslateMeasurements::InitMeasurements()
     InitGroupO(); // Men & Tailoring
     InitGroupP(); // Historical & Specialty
     InitGroupQ(); // Patternmaking measurements
+
+    InitKnitMeasurements(); // Марта's knitting-measurement dictionary
+}
+
+/**
+ * @brief Initializes measurements from Марта's personal knitting-measurement
+ * dictionary (see knit_measurements.h). Unlike the InitGroup* methods above,
+ * this list isn't hard-coded -- it's read from a file the user can edit and
+ * that grows automatically as new custom measurements are registered.
+ */
+void VTranslateMeasurements::InitKnitMeasurements()
+{
+    const QVector<KnitMeasurementInfo> &dictionary = KnitMeasurementDictionary();
+    for (int i = 0; i < dictionary.size(); ++i)
+    {
+        const KnitMeasurementInfo &entry = dictionary.at(i);
+
+        const qmu::QmuTranslation m("VTranslateMeasurements", entry.name);
+        const qmu::QmuTranslation g("VTranslateMeasurements", entry.fullName);
+        const qmu::QmuTranslation d("VTranslateMeasurements", entry.description);
+
+        InitMeasurement(entry.name, m, g, d, QString());
+    }
 }
 
 /**

@@ -214,7 +214,7 @@
            </sizepolicy>
           </property>
           <property name="alternatingRowColors">
-           <bool>true</bool>
+           <bool>false</bool>
           </property>
           <property name="selectionBehavior">
            <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
@@ -390,6 +390,19 @@
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_5">
            <item>
+            <widget class="QCheckBox" name="checkBoxIsSection">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="toolTip">
+              <string>Marks this row as a section divider, not a real measurement -- it has no formula and is never used in calculations. Just a way to split a long measurement list into logical groups.</string>
+             </property>
+             <property name="text">
+              <string>Section (not used in calculations)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <layout class="QHBoxLayout" name="horizontalLayout_3">
              <item>
               <widget class="QLabel" name="label">
@@ -559,7 +572,7 @@
                  </property>
                 </widget>
                </item>
-               <item alignment="Qt::AlignRight">
+               <item alignment="Qt::AlignmentFlag::AlignRight">
                 <widget class="QToolButton" name="toolButtonExpr">
                  <property name="enabled">
                   <bool>false</bool>
@@ -1617,6 +1630,9 @@
    <property name="text">
     <string>Add known</string>
    </property>
+   <property name="visible">
+    <bool>false</bool>
+   </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>
    </property>
@@ -1631,6 +1647,9 @@
    </property>
    <property name="text">
     <string>Add custom</string>
+   </property>
+   <property name="shortcut">
+    <string>Meta+Т</string>
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>

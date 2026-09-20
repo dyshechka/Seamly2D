@@ -130,6 +130,7 @@ public:
     void             SetMHeightIncrease(const QString &name, double value);
     void             SetMDescription(const QString &name, const QString &text);
     void             SetMFullName(const QString &name, const QString &text);
+    void             SetMIsSection(const QString &name, bool value);
 
     static const QString TagVST;
     static const QString TagVIT;
@@ -156,6 +157,7 @@ public:
     static const QString AttrDescription;
     static const QString AttrName;
     static const QString AttrFullName;
+    static const QString AttrIsSection;
 
     static const QString GenderMale;
     static const QString GenderFemale;

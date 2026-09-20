@@ -62,6 +62,7 @@
 #include "../ifc/ifcdef.h"
 #include "vvariable.h"
 #include "measurement_variable_p.h"
+#include "../measurements_def.h"
 
 #ifdef Q_COMPILER_RVALUE_REFS
 MeasurementVariable &MeasurementVariable::operator=(MeasurementVariable &&m) noexcept
@@ -103,9 +104,9 @@ MeasurementVariable::MeasurementVariable(quint32 index, const QString &name, qre
  */
 MeasurementVariable::MeasurementVariable(VContainer *data, quint32 index, const QString &name, const qreal &base,
                            const QString &formula, bool ok, const QString &gui_text, const QString &description,
-                           const QString &tagName)
+                           const QString &tagName, bool isSection)
     : VVariable(name, description)
-    , d(new MeasurementVariableData(data, index, formula, ok, gui_text, tagName, base))
+    , d(new MeasurementVariableData(data, index, formula, ok, gui_text, tagName, base, isSection))
 {
     SetType(VarType::Measurement);
     VInternalVariable::SetValue(base);
@@ -293,7 +294,13 @@ QString MeasurementVariable::GetFormula() const
 //---------------------------------------------------------------------------------------------------------------------
 bool MeasurementVariable::isCustom() const
 {
-    return GetName().indexOf(CustomMSign) == 0;
+    // A measurement counts as "custom" -- freely renameable, its full name
+    // and description editable by hand -- unless it's one of the built-in
+    // sewing measurements (measurements_def.h), whose meaning is fixed.
+    // This covers both the historical "@name" convention (kept for files
+    // that still use it) and plain names that simply aren't in the sewing
+    // dictionary, such as Марта's knitting measurements.
+    return GetName().indexOf(CustomMSign) == 0 || !AllGroupNames().contains(GetName());
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -306,6 +313,12 @@ int MeasurementVariable::Index() const
 bool MeasurementVariable::IsFormulaOk() const
 {
     return d->formulaOk;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool MeasurementVariable::IsSection() const
+{
+    return d->isSection;
 }
 
 //---------------------------------------------------------------------------------------------------------------------

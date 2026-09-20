@@ -9772,6 +9772,10 @@ Press enter to temporarily add it to the list.</source>
         <translation>Невозможно расширить конечную точку внутреннего пути &apos;%1&apos; до линии разреза.</translation>
     </message>
     <message>
+        <source>Variable &quot;$TOK$&quot; not found (position $POS$). Check that the name is typed correctly (including letter case and keyboard layout) and that it wasn&apos;t deleted or renamed.</source>
+        <translation>Переменная «$TOK$» не найдена (позиция $POS$). Проверьте, что имя набрано правильно (включая регистр и раскладку клавиатуры), и что оно не было удалено или переименовано.</translation>
+    </message>
+    <message>
         <source>%1</source>
         <translation>%1</translation>
     </message>
@@ -11150,6 +11154,18 @@ Press enter to temporarily add it to the list.</source>
 </context>
 <context>
     <name>TMainWindow</name>
+    <message>
+        <source>Section (not used in calculations)</source>
+        <translation>Блок-разделитель</translation>
+    </message>
+    <message>
+        <source>This formula uses &quot;%1&quot;, which is a section divider and can&apos;t be used in calculations.</source>
+        <translation>Формула ссылается на &quot;%1&quot; — это блок-разделитель, который не может участвовать в расчетах.</translation>
+    </message>
+    <message>
+        <source>A measurement this formula uses was just changed. Open this row to confirm the result is still what you expect -- doing so clears this reminder.</source>
+        <translation>Мерка, от которой зависит эта формула, только что была изменена. Откройте эту строку, чтобы убедиться, что результат по-прежнему верный — это уберёт напоминание.</translation>
+    </message>
     <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:18pt;&quot;&gt;Select New for creation measurement file.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:18pt;&quot;&gt;Выберите Новый для создания файла мерок.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>

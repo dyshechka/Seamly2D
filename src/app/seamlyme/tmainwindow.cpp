@@ -56,13 +56,13 @@
 #include "tmainwindow.h"
 #include "ui_tmainwindow.h"
 #include "dialogs/dialogaboutseamlyme.h"
-#include "dialogs/new_measurements_dialog.h"
 #include "dialogs/database_dialog.h"
 #include "dialogs/dialogseamlymepreferences.h"
 #include "dialogs/dialogexporttocsv.h"
 #include "dialogs/me_shortcuts_dialog.h"
 #include "../vpatterndb/calculator.h"
 #include "../vpatterndb/measurements_def.h"
+#include "../vpatterndb/knit_measurements.h"
 #include "../vpatterndb/pmsystems.h"
 #include "../ifc/ifcdef.h"
 #include "../ifc/xml/individual_size_converter.h"
@@ -87,8 +87,14 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
+#include <QFont>
 #include <QPainter>
+#include <QPen>
 #include <QPixmap>
+#include <QPointF>
+#include <QPolygonF>
+#include <QRectF>
+#include <QStyleFactory>
 #include <QPrinter>
 #include <QPrintPreviewDialog>
 #include <QProcess>
@@ -118,6 +124,81 @@ enum {ColumnName = 0, ColumnNumber, ColumnFullName, ColumnCalcValue, ColumnFormu
 // onto multiple lines instead of stretching the column to fit one very long
 // line (see initializeTable() and RefreshTable()).
 static const int maxFormulaColumnWidth = 260;
+
+// Row-highlight colors for the measurements table (Individual/single-size files only -- see
+// RefreshTable(), SetRowHighlight()). Priority when more than one might apply to the same row
+// is problem, then reminder, then blue (a section-divider row is exclusively blue and never
+// reaches the problem/reminder checks at all -- see meash->IsSection() in
+// RefreshTable()/ShowNewMData()). Colors follow the usual warning-color association -- orange
+// reads as "worth a look", pink/red reads as "something's actually wrong" -- rather than the
+// color names matching the QColor variable names, which is why these are named by role, not by
+// hue:
+//   blue     -- this row is a section divider (checkBoxIsSection), not a real measurement -- it
+//               has no formula and is never used in calculations. Purely organizational, so a
+//               long measurement list can be split into logical groups.
+//   reminder -- (orange) a measurement this formula uses was just edited elsewhere; the result
+//               here may have quietly changed. Worth a look, not urgent -- the formula itself is
+//               still fine. Also gets a small warning icon in front of the Formula column's text
+//               (display only -- see ReminderRowIcon() -- never written into the formula itself
+//               or the edit field, so it can't end up saved or interfere with comparing against
+//               what's currently typed). Cleared once the row is viewed or its own formula is
+//               (re)saved -- see MarkMeasurementSaved()/ShowNewMData().
+//   problem  -- (pink) the formula currently sitting in this row is unsaved and invalid (a
+//               draft -- see CommitMValue()), or it references a section divider, which has no
+//               real value to use. Needs fixing.
+static const QColor rowHighlightBlue(0xca, 0xda, 0xf8);
+static const QColor rowHighlightReminder(0xfc, 0xe5, 0xcd); // orange
+static const QColor rowHighlightProblem(0xf4, 0xcc, 0xcc);  // pink
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief ReminderRowIcon a small warning-triangle icon shown in front of the Formula column's
+ * text for a "reminder" (rowHighlightReminder) row -- see the comment above rowHighlightBlue.
+ * Built once into a static QIcon and reused -- RefreshTable() rebuilds every row on every
+ * change, so this runs often enough to be worth not re-rendering a glyph-to-pixmap every time.
+ * Deliberately an icon (QTableWidgetItem::setIcon()), not text prepended to the cell's own
+ * string: that string doubles as the "what's actually saved" reference CommitMValueFor() and
+ * Fx() compare the edit field against, so anything added there would end up either stuck in the
+ * saved formula or breaking that comparison.
+ */
+static const QIcon &ReminderRowIcon()
+{
+	static const QIcon icon = []()
+	{
+		// Drawn as plain vector shapes (a filled triangle plus an exclamation mark made of a
+		// small rectangle and a dot) -- deliberately NOT emoji text ("\u26A0\uFE0F" via
+		// QPainter::drawText(), which is what this used to do). That emoji version crashed:
+		// on this Mac's macOS/Qt combination, Qt renders that particular glyph through
+		// CoreText, which loads its color bitmap ("sbix" table, used for full-color emoji)
+		// via ImageIO's PNG decoder -- and that decoder crashed with SIGBUS the first time
+		// this icon was built (see the crash report Марта sent: SIGBUS inside
+		// IIOReadPlugin::callInitialize(), reached from QPainter::drawText() ->
+		// CTFontDrawGlyphs() -> TCGImageData::TCGImageData(..., TsbixContext const&, ...),
+		// called from right here via RefreshTable()). A hand-drawn shape needs no font or
+		// color-glyph rendering at all, so it can't hit that code path again.
+		QPixmap pixmap(16, 16);
+		pixmap.fill(Qt::transparent);
+
+		QPainter painter(&pixmap);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+
+		QPolygonF triangle;
+		triangle << QPointF(8.0, 1.5) << QPointF(15.0, 14.5) << QPointF(1.0, 14.5);
+
+		painter.setPen(QPen(QColor(0x8a, 0x5a, 0x00), 1.2));
+		painter.setBrush(QColor(0xf5, 0xa6, 0x23));
+		painter.drawPolygon(triangle);
+
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(0x3a, 0x2a, 0x00));
+		painter.drawRect(QRectF(7.3, 5.5, 1.4, 5.0));     // the exclamation mark's stroke
+		painter.drawEllipse(QRectF(7.3, 11.5, 1.4, 1.4)); // its dot
+
+		painter.end();
+		return QIcon(pixmap);
+	}();
+	return icon;
+}
 
 //---------------------------------------------------------------------------------------------------------------------
 TMainWindow::TMainWindow(QWidget *parent)
@@ -173,6 +254,19 @@ TMainWindow::TMainWindow(QWidget *parent)
 
     // Заставляем строки автоматически расширяться по высоте под объем текста
     ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+
+    // Force this one table onto the cross-platform Fusion style instead of the native macOS
+    // one it would otherwise inherit from the app. On this Mac, the native style paints each
+    // row's background itself (including its own zebra-striping) and doesn't reliably respect a
+    // per-item Qt::BackgroundRole -- confirmed directly: turning tableWidget's own
+    // "alternatingRowColors" property off (see the .ui file and SetRowHighlight()) made no
+    // difference, a "reminder" row still came out plain gray instead of orange even though its
+    // warning icon (a separate paint step) showed up fine. Fusion paints entirely through Qt's
+    // own item-view delegate rather than native row drawing, so item->setBackground() (used for
+    // the blue/reminder/problem row highlighting, see SetRowHighlight()) is respected reliably.
+    // Scoped to just this widget -- setStyle() here doesn't touch the look of the rest of the
+    // window.
+    ui->tableWidget->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
 	ui->mainToolBar->setContextMenuPolicy(Qt::PreventContextMenu);
 	ui->toolBarGradation->setContextMenuPolicy(Qt::PreventContextMenu);
@@ -269,6 +363,17 @@ void TMainWindow::setPUnit(Unit unit)
 bool TMainWindow::LoadFile(const QString &path)
 {
     QString filename = path;
+
+	if (individualMeasurements != nullptr && CanReplaceCurrentWindow())
+	{
+		// See the identical reset in FileNew() -- this window has nothing worth keeping, so load
+		// the file here instead of opening a separate window for it.
+		delete individualMeasurements;
+		individualMeasurements = nullptr;
+		delete data;
+		data = nullptr;
+	}
+
 	if (individualMeasurements == nullptr)
 	{
 		if (!QFileInfo(filename).exists())
@@ -414,36 +519,33 @@ void TMainWindow::updateGroups()
 //---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::FileNew()
 {
+	if (individualMeasurements != nullptr && CanReplaceCurrentWindow())
+	{
+		// This window is still showing a brand new, completely untouched file (nothing typed,
+		// nothing saved) -- reset it and start over here instead of opening yet another window
+		// for what would otherwise be an identical blank file.
+		delete individualMeasurements;
+		individualMeasurements = nullptr;
+		delete data;
+		data = nullptr;
+	}
+
 	if (individualMeasurements == nullptr)
 	{
-		NewMeasurementsDialog measurements(this);
-		if (measurements.exec() == QDialog::Rejected)
-		{
-			return;
-		}
-
-		mUnit = measurements.measurementUnits();
+		// The old "New measurement file" dialog (type/unit/base size/base
+		// height) has been removed -- new files are always Individual, in
+		// centimeters. Multisize files can still be opened via "Open
+		// multisize" even though they're no longer offered when creating a
+		// new file.
+		mUnit = Unit::Cm;
 		pUnit = mUnit;
-		mType = measurements.type();
+		mType = MeasurementsType::Individual;
 
 		data = new VContainer(qApp->translateVariables(), &mUnit);
-		currentHeight = measurements.baseHeight();
-		currentSize = measurements.baseSize();
 
-		if (mType == MeasurementsType::Multisize)
-		{
-			individualMeasurements = new MeasurementDoc(mUnit, measurements.baseSize(), measurements.baseHeight(), data);
-			individualMeasurements->setSize(&currentSize);
-			individualMeasurements->setHeight(&currentHeight);
-			m_curFileFormatVersion = MultiSizeConverter::MeasurementMaxVer;
-			m_curFileFormatVersionStr = MultiSizeConverter::MeasurementMaxVerStr;
-		}
-		else
-		{
-			individualMeasurements = new MeasurementDoc(mUnit, data);
-			m_curFileFormatVersion = IndividualSizeConverter::MeasurementMaxVer;
-			m_curFileFormatVersionStr = IndividualSizeConverter::MeasurementMaxVerStr;
-		}
+		individualMeasurements = new MeasurementDoc(mUnit, data);
+		m_curFileFormatVersion = IndividualSizeConverter::MeasurementMaxVer;
+		m_curFileFormatVersionStr = IndividualSizeConverter::MeasurementMaxVerStr;
 
 		m_isReadOnly = individualMeasurements->isReadOnly();
 		UpdatePadlock(m_isReadOnly);
@@ -454,6 +556,12 @@ void TMainWindow::FileNew()
 		InitWindow();
 
 		MeasurementGUI();
+
+		// A brand new file used to come up with an empty table -- nothing to click on, nothing
+		// to show in the details panel below. Give her a first row right away, the same as
+		// pressing the "Custom" add button herself, so "New" always produces something she can
+		// immediately start filling in instead of a blank screen.
+		AddCustom();
 	}
 	else
 	{
@@ -747,6 +855,53 @@ void TMainWindow::showEvent(QShowEvent *event)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::eventFilter(QObject *object, QEvent *event)
 {
+	if (object == ui->plainTextEditFormula && event->type() == QEvent::FocusOut)
+	{
+		if (ui->plainTextEditFormula->toPlainText().isEmpty())
+		{
+			// Nothing was typed after the placeholder zero was cleared on focus-in (or
+			// everything was deleted by hand) -- put the safe default back instead of leaving
+			// the field empty or showing an "Empty field" error.
+			ui->plainTextEditFormula->blockSignals(true);
+			ui->plainTextEditFormula->setPlainText(QStringLiteral("0"));
+			ui->plainTextEditFormula->blockSignals(false);
+		}
+
+		// Formula editing is considered "finished" once the field loses focus (the user
+		// clicked/tabbed away, selected another measurement, etc.) -- commit the pending
+		// edit and refresh the table now. See SaveMValue()/CommitMValue() for why this is
+		// deferred instead of happening on every keystroke.
+		CommitMValue();
+		// Fall through to QMainWindow::eventFilter() below so normal focus handling still
+		// happens for this widget.
+	}
+	else if (object == ui->plainTextEditFormula && event->type() == QEvent::FocusIn)
+	{
+		// A brand new/custom measurement starts with a placeholder formula of just "0". Clicking
+		// in to type a real formula used to leave that "0" in place, so the first keystrokes were
+		// silently glued onto it (e.g. "0acos(...)") instead of replacing it -- same issue as the
+		// Fx dialog already solves for via EditFormulaDialog::SetFormula(). Reuse the same
+		// "autoClearFx" setting here so the two stay consistent.
+		if (qApp->Settings()->autoClearFx())
+		{
+			const QString text = ui->plainTextEditFormula->toPlainText();
+			bool isDouble = false;
+			const double value = text.toDouble(&isDouble);
+			// Only the placeholder zero gets cleared here -- any other value already sitting in
+			// this field (including one just typed a moment ago) is left completely alone.
+			if (isDouble && qFuzzyIsNull(value))
+			{
+				// Silence textChanged for this programmatic clear -- otherwise SaveMValue() sees the
+				// now-empty field and immediately shows "Error. Empty field.", even though the user
+				// hasn't done anything yet. CommitMValue() shows that same message later, but only if
+				// they actually leave the field still empty -- see the comment there.
+				ui->plainTextEditFormula->blockSignals(true);
+				ui->plainTextEditFormula->clear();
+				ui->plainTextEditFormula->blockSignals(false);
+			}
+		}
+	}
+
 	if (QPlainTextEdit *plainTextEdit = qobject_cast<QPlainTextEdit *>(object))
 	{
 		if (event->type() == QEvent::KeyPress)
@@ -980,6 +1135,11 @@ void TMainWindow::printPages(QPrinter *printer)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::FileSave()
 {
+	// Make sure a formula edit still in progress (cursor never left the field, e.g. Ctrl+S
+	// pressed mid-edit) isn't silently dropped -- SaveMeasurements() below only writes what's
+	// already committed to the model.
+	CommitMValue();
+
 	if (curFile.isEmpty() || m_isReadOnly)
 	{
 		return FileSaveAs();
@@ -1077,6 +1237,10 @@ bool TMainWindow::FileSave()
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::FileSaveAs()
 {
+	// See the identical call in FileSave() -- flush any formula edit still in progress
+	// before writing the file.
+	CommitMValue();
+
 	QString dir;
     QString filters;
     QString suffix;
@@ -1384,7 +1548,16 @@ void TMainWindow::Remove()
 	}
 
 	const QTableWidgetItem *nameField = ui->tableWidget->item(ui->tableWidget->currentRow(), 0);
-	individualMeasurements->Remove(nameField->data(Qt::UserRole).toString());
+	const QString removedName = nameField->data(Qt::UserRole).toString();
+	individualMeasurements->Remove(removedName);
+
+	// A deleted measurement's leftover draft/reminder-flag bookkeeping would otherwise sit in these
+	// maps forever (they're only ever cleared by name, on resave/view -- see MarkMeasurementSaved()
+	// and ShowNewMData()), ready to wrongly apply to some future, unrelated measurement that
+	// happens to get the same name later. m_usedByMeasurement doesn't need this: RefreshTable()
+	// rebuilds it from scratch on every call.
+	m_formulaDrafts.remove(removedName);
+	m_affectedMeasurements.remove(removedName);
 
 	MeasurementsWasSaved(false);
 
@@ -1394,7 +1567,12 @@ void TMainWindow::Remove()
 
 	if (ui->tableWidget->rowCount() > 0)
 	{
-		ui->tableWidget->selectRow(row);
+		// row is the just-removed measurement's old position. If it was the last row, that
+		// index no longer exists after removal -- selectRow() would silently do nothing, the
+		// Details panel would keep showing the deleted row's now-stale data, and nothing would
+		// end up selected at all. Clamp to the new last row in that case (effectively landing on
+		// the previous row, which is what's expected when deleting the last one).
+		ui->tableWidget->selectRow(qMin(row, ui->tableWidget->rowCount() - 1));
 	}
 	else
 	{
@@ -1544,10 +1722,35 @@ void TMainWindow::Fx()
 		return;
 	}
 
+	// The "Функция" dialog's Measurements list should only offer rows that make sense to pick:
+	// this measurement's private snapshot (see readMeasurements()) already excludes anything
+	// defined after it in the file, but section-divider rows -- organizational only, never a
+	// real value, see checkBoxIsSection/IsSection() -- are still in there and would be a
+	// meaningless, broken choice to insert into a formula. Strip them out before handing the
+	// snapshot to the dialog. Safe to mutate: GetData() returns this one measurement's own
+	// private copy (taken when the file was last read/refreshed), not shared with anyone else.
+	{
+		const QMap<QString, QSharedPointer<MeasurementVariable>> snapshotMeasurements =
+				meash->GetData()->DataMeasurements();
+		QMapIterator<QString, QSharedPointer<MeasurementVariable>> iSnap(snapshotMeasurements);
+		while (iSnap.hasNext())
+		{
+			iSnap.next();
+			if (iSnap.value()->IsSection())
+			{
+				meash->GetData()->RemoveVariable(iSnap.key());
+			}
+		}
+	}
+
 	EditFormulaDialog *dialog = new EditFormulaDialog(meash->GetData(), NULL_ID, MeasurementDialog, this);
 	dialog->setWindowTitle(tr("Edit measurement"));
-	dialog->SetFormula(qApp->translateVariables()->TryFormulaFromUser(ui->plainTextEditFormula->toPlainText().replace("\n", " "),
-														  true));
+	// Keep line breaks as typed when opening the dialog -- flattening them here used to throw
+	// away her multi-line formatting the moment "Функция" was opened, before she'd even touched
+	// anything. The parser treats a line break as insignificant whitespace either way (same as
+	// TranslateVariables()/EvalFormula() elsewhere in this file), so nothing about evaluation
+	// depends on flattening it first.
+	dialog->SetFormula(qApp->translateVariables()->TryFormulaFromUser(ui->plainTextEditFormula->toPlainText(), true));
 	const QString postfix = UnitsToStr(mUnit, true);//Show unit in dialog label (cm, mm or inch)
 	dialog->setPostfix(postfix);
 
@@ -1555,7 +1758,42 @@ void TMainWindow::Fx()
 	{
 		// Because of the bug need to take QTableWidgetItem twice time. Previous update "killed" the pointer.
 		const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
-		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), dialog->GetFormula());
+		const QString newFormula = dialog->GetFormula();
+
+		// The list above already strips section-divider rows out of what this dialog offers to
+		// pick from, but nothing stops her from typing a name by hand instead -- and the result
+		// (e.g. "Тест + Тест") is otherwise perfectly valid math, so the dialog's own validation
+		// has no reason to refuse it. Same check as CommitMValueFor()/RefreshTable(): refuse to
+		// commit it here too, keep it as a problem (pink) draft, and explain why, instead of silently
+		// accepting a meaningless result.
+		QString sectionRefName;
+		if (FormulaReferencesSection(newFormula, &sectionRefName))
+		{
+			const QString errPostfix = UnitsToStr(mUnit);
+			const QString message = tr("This formula uses \"%1\", which is a section divider "
+										"and can't be used in calculations.").arg(sectionRefName);
+			ui->labelCalculatedValue->setText(tr("Error") + " (" + errPostfix + "). " + message);
+			ui->labelCalculatedValue->setToolTip(message);
+
+			QString userFormula;
+			try
+			{
+				userFormula = qApp->translateVariables()->FormulaToUser(newFormula, qApp->Settings()->getOsSeparator());
+			}
+			catch (qmu::QmuParserError &error)
+			{
+				Q_UNUSED(error)
+				userFormula = newFormula;
+			}
+			m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), userFormula);
+			SetRowHighlight(row, rowHighlightProblem);
+
+			delete dialog;
+			return;
+		}
+
+		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), newFormula);
+		MarkMeasurementSaved(nameField->data(Qt::UserRole).toString());
 
 		MeasurementsWasSaved(false);
 
@@ -1770,6 +2008,45 @@ void TMainWindow::ShowMData()
 //---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::ShowNewMData(bool fresh)
 {
+	if (fresh && !m_editingMeasurementName.isEmpty())
+	{
+		const QTableWidgetItem *targetNameField = ui->tableWidget->item(ui->tableWidget->currentRow(), ColumnName);
+		const QString targetMeasurementName = targetNameField ? targetNameField->data(Qt::UserRole).toString()
+															   : QString();
+
+		if (targetMeasurementName != m_editingMeasurementName)
+		{
+			// The row selection already changed (e.g. a mouse click on another row can move
+			// focus and so deliver plainTextEditFormula's FocusOut -- see eventFilter() --
+			// only after the table's own selection, and this function's own repaint of that
+			// field, already happened; by then CommitMValue() would read the field's
+			// now-overwritten text against the WRONG row and silently discard whatever she'd
+			// typed for the row she's leaving). Flush that pending edit first, explicitly by
+			// name rather than trusting currentRow(), which by this point already points at
+			// the new row.
+			CommitMValueFor(m_editingMeasurementName, false);
+
+			// A successful commit above calls RefreshData(), which rebuilds the whole table and
+			// can leave a different row selected (or none) -- put the selection back on the row
+			// she actually clicked/navigated to. Look it up by name again since a full rebuild
+			// can also shift row indexes.
+			if (!targetMeasurementName.isEmpty())
+			{
+				for (int row = 0; row < ui->tableWidget->rowCount(); ++row)
+				{
+					const QTableWidgetItem *item = ui->tableWidget->item(row, ColumnName);
+					if (item && item->data(Qt::UserRole).toString() == targetMeasurementName)
+					{
+						ui->tableWidget->blockSignals(true);
+						ui->tableWidget->selectRow(row);
+						ui->tableWidget->blockSignals(false);
+						break;
+					}
+				}
+			}
+		}
+	}
+
 	if (ui->tableWidget->rowCount() > 0)
 	{
 		MFields(true);
@@ -1786,6 +2063,7 @@ void TMainWindow::ShowNewMData(bool fresh)
 		catch(const VExceptionBadId &exception)
 		{
 			Q_UNUSED(exception)
+			m_editingMeasurementName.clear();
 			MFields(false);
 			return;
 		}
@@ -1813,6 +2091,11 @@ void TMainWindow::ShowNewMData(bool fresh)
 
 		if (mType == MeasurementsType::Multisize)
 		{
+			// Formula-edit tracking (m_editingMeasurementName, see the flush-on-row-switch logic
+			// at the top of this function) only applies to the Individual-file formula field
+			// below -- make sure a stale name from an earlier selection can't linger here.
+			m_editingMeasurementName.clear();
+
 			ui->labelCalculatedValue->blockSignals(true);
 			ui->doubleSpinBoxBaseValue->blockSignals(true);
 			ui->doubleSpinBoxInSizes->blockSignals(true);
@@ -1837,29 +2120,134 @@ void TMainWindow::ShowNewMData(bool fresh)
 		}
 		else
 		{
-			EvalFormula(meash->GetFormula(), false, meash->GetData(), ui->labelCalculatedValue);
+			const QString measurementName = nameField->data(Qt::UserRole).toString();
 
-			ui->plainTextEditFormula->blockSignals(true);
+			ui->checkBoxIsSection->blockSignals(true);
+			ui->checkBoxIsSection->setChecked(meash->IsSection());
+			ui->checkBoxIsSection->blockSignals(false);
 
-			QString formula;
-			try
+			if (meash->IsSection())
 			{
-				formula = qApp->translateVariables()->FormulaToUser(meash->GetFormula(), qApp->Settings()->getOsSeparator());
-			}
-			catch (qmu::QmuParserError &error)
-			{
-				Q_UNUSED(error)
-				formula = meash->GetFormula();
-			}
+				// A section divider has no formula and nothing to calculate -- don't show or
+				// let her edit one here. MFields(true) above enabled these widgets generically;
+				// override that for this one row.
+				ui->plainTextEditFormula->blockSignals(true);
+				ui->plainTextEditFormula->clear();
+				ui->plainTextEditFormula->blockSignals(false);
+				ui->plainTextEditFormula->setEnabled(false);
+				ui->toolButtonExpr->setEnabled(false);
 
-			ui->plainTextEditFormula->setPlainText(formula);
-			ui->plainTextEditFormula->blockSignals(false);
+				ui->labelCalculatedValue->setText(QString());
+				ui->labelCalculatedValue->setToolTip(QString());
+
+				// Nothing here for CommitMValue()/CommitMValueFor() to ever commit -- see the
+				// flush-on-row-switch logic at the top of this function.
+				m_editingMeasurementName.clear();
+			}
+			else
+			{
+				// This row's formula field is now what's on screen and editable -- record it so
+				// switching to another row (see the flush logic at the top of this function)
+				// knows whose pending edit to commit before showing anything else.
+				m_editingMeasurementName = measurementName;
+
+				// A formula that's currently invalid or hasn't been saved (see CommitMValue())
+				// is kept separately from the model -- check it first so switching away and
+				// back to this row shows what she was actually typing, not the last value that
+				// saved successfully.
+				const bool hasDraft = m_formulaDrafts.contains(measurementName);
+				const QString draftFormula = hasDraft ? m_formulaDrafts.value(measurementName) : QString();
+
+				if (hasDraft)
+				{
+					EvalFormula(draftFormula, true, meash->GetData(), ui->labelCalculatedValue);
+				}
+				else
+				{
+					EvalFormula(meash->GetFormula(), false, meash->GetData(), ui->labelCalculatedValue);
+
+					// EvalFormula() above only catches parser failures and infinite/NaN results --
+					// a formula that refers to a section divider (checkBoxIsSection) parses and
+					// computes just fine on its own (the divider row still holds a numeric value,
+					// see MeasurementDoc::readMeasurements()), so it needs this separate check, the
+					// same one RefreshTable() uses for the row's problem highlight/red value below.
+					// Without this, the Value field here would silently show a normal-looking
+					// number while the table row is flagged as an error, with nothing to explain
+					// why.
+					QString sectionRefName;
+					if (FormulaReferencesSection(meash->GetFormula(), &sectionRefName))
+					{
+						const QString postfix = UnitsToStr(pUnit);
+						const QString message = tr("This formula uses \"%1\", which is a section "
+													"divider and can't be used in calculations.")
+													.arg(sectionRefName);
+						ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+						ui->labelCalculatedValue->setToolTip(message);
+					}
+				}
+
+				ui->plainTextEditFormula->blockSignals(true);
+
+				QString formula;
+				if (hasDraft)
+				{
+					// Already in the same as-typed form the field holds -- no FormulaToUser()
+					// translation needed (or wanted, it was never saved in internal form).
+					formula = draftFormula;
+				}
+				else
+				{
+					try
+					{
+						formula = qApp->translateVariables()->FormulaToUser(meash->GetFormula(), qApp->Settings()->getOsSeparator());
+					}
+					catch (qmu::QmuParserError &error)
+					{
+						Q_UNUSED(error)
+						formula = meash->GetFormula();
+					}
+				}
+
+				ui->plainTextEditFormula->setPlainText(formula);
+				ui->plainTextEditFormula->blockSignals(false);
+
+				// Viewing this row counts as having checked it -- clear any pending "something
+				// this depends on just changed" flag now instead of waiting for the next full
+				// refresh. See the priority comment above rowHighlightBlue: a still-unsaved draft
+				// keeps its problem highlight regardless. Otherwise, if the formula is still
+				// broken after this look (e.g. it references a name that hasn't been fixed up
+				// yet), upgrade the row from reminder to problem -- she's seen it, but it still
+				// needs attention -- rather than clearing the highlight as if everything were
+				// fine.
+				if (m_affectedMeasurements.remove(measurementName))
+				{
+					QColor rowColor;
+					if (hasDraft || !meash->IsFormulaOk())
+					{
+						rowColor = rowHighlightProblem;
+					}
+					SetRowHighlight(ui->tableWidget->currentRow(), rowColor);
+
+					// The reminder icon (see ReminderRowIcon()) lives on the Formula item as its
+					// own Qt::DecorationRole, separate from the row's background color set just
+					// above -- clearing the highlight doesn't clear it, so without this line it
+					// would keep showing even once the row stops being flagged, whether it
+					// settles back to plain (rowColor left invalid) or turns into a problem row
+					// (rowColor = rowHighlightProblem, which gets its own red error indicator
+					// elsewhere and was never given this icon to begin with -- see RefreshTable()).
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(ui->tableWidget->currentRow(), ColumnFormula))
+					{
+						formulaItem->setIcon(QIcon());
+					}
+				}
+			}
 		}
 
 		MeasurementGUI();
 	}
 	else
 	{
+		m_editingMeasurementName.clear();
 		MFields(false);
 	}
 }
@@ -1938,7 +2326,10 @@ void TMainWindow::SaveMName(const QString &text)
 
 	if (meash->isCustom())
 	{
-		newName.isEmpty() ? newName = GetCustomName() : newName = CustomMSign + newName;
+		if (newName.isEmpty())
+		{
+			newName = GetCustomName();
+		}
 
 		if (!data->IsUnique(newName))
 		{
@@ -1951,6 +2342,23 @@ void TMainWindow::SaveMName(const QString &text)
 			} while (!data->IsUnique(name));
 			newName = name;
 		}
+
+		// The measurement keeps its formula/value -- nothing about IT changed -- but any other
+		// row whose formula refers to it BY THIS OLD NAME just had that reference silently
+		// broken (SetMName() below only renames this one measurement; it doesn't rewrite
+		// formulas elsewhere that mention the old name -- see MeasurementDoc::SetMName()). Flag
+		// those rows the same way an edited formula does (see MarkMeasurementSaved()), so she
+		// notices and can update them, and drop any stale draft/affected bookkeeping under the
+		// name that's about to stop existing so it can't leak onto some future, unrelated
+		// measurement that reuses it (see the same concern in Remove()).
+		const QString oldName = nameField->data(Qt::UserRole).toString();
+		const QStringList affected = m_usedByMeasurement.value(oldName);
+		for (const QString &affectedName : affected)
+		{
+			m_affectedMeasurements.insert(affectedName);
+		}
+		m_affectedMeasurements.remove(oldName);
+		m_formulaDrafts.remove(oldName);
 
 		individualMeasurements->SetMName(nameField->text(), newName);
 		MeasurementsWasSaved(false);
@@ -1970,6 +2378,13 @@ void TMainWindow::SaveMName(const QString &text)
 //---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::SaveMValue()
 {
+	// Live preview only: update the "calculated value" label as the user types, without
+	// touching the measurements model or rebuilding the whole table. On a large file with
+	// many cross-referencing formulas, doing the full commit (see CommitMValue()) on every
+	// keystroke made typing a formula lag by several seconds per letter. The actual commit
+	// now happens once editing is finished -- see CommitMValue(), called from an eventFilter()
+	// FocusOut on this field, and also flushed explicitly before saving the file (FileSave()/
+	// FileSaveAs()) so Ctrl+S can never miss an edit still in progress.
 	const int row = ui->tableWidget->currentRow();
 
 	if (row == -1)
@@ -2017,15 +2432,136 @@ void TMainWindow::SaveMValue()
 		return;
 	}
 
+	// Just refresh the live preview label -- EvalFormula() only evaluates this one formula,
+	// it does not touch the rest of the table, so this stays cheap even on a big file.
+	EvalFormula(text, true, meash->GetData(), ui->labelCalculatedValue);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Commit the formula currently in the editor to the measurements model and refresh the
+ * whole table, for whichever measurement is named by measurementName -- not necessarily
+ * ui->tableWidget->currentRow(), which may already have moved on to a different row by the
+ * time this runs (see ShowNewMData()'s flush-on-row-switch logic; CommitMValue() below is the
+ * normal FocusOut-triggered path and always targets the row that's still current). This is the
+ * expensive half of what used to be SaveMValue() -- it recalculates every measurement
+ * (readMeasurements(), via RefreshData()) and rebuilds every row of the table (RefreshTable()),
+ * which is why it only runs once editing is finished rather than on every keystroke. Safe to
+ * call when nothing changed -- it compares against the stored formula first and does nothing
+ * if they already match.
+ * @param restoreSelection re-select the committed row afterward (blockSignals'd, so it won't
+ * re-trigger ShowNewMData()) and restore the text cursor. Pass false when the caller is about
+ * to select a different row itself right after (the row-switch flush), so this doesn't fight
+ * that -- the row being flushed is being left, not shown.
+ */
+void TMainWindow::CommitMValueFor(const QString &measurementName, bool restoreSelection)
+{
+	if (measurementName.isEmpty())
+	{
+		return;
+	}
+
+	int row = -1;
+	for (int candidate = 0; candidate < ui->tableWidget->rowCount(); ++candidate)
+	{
+		const QTableWidgetItem *item = ui->tableWidget->item(candidate, ColumnName);
+		if (item && item->data(Qt::UserRole).toString() == measurementName)
+		{
+			row = candidate;
+			break;
+		}
+	}
+
+	if (row == -1)
+	{
+		// The row is gone (e.g. deleted from under this pending edit) -- nothing to commit to.
+		return;
+	}
+
+	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
+
+	QString text = ui->plainTextEditFormula->toPlainText();
+
+	QTableWidgetItem *formulaField = ui->tableWidget->item(row, ColumnFormula);
+	if (formulaField->text() == text)
+	{
+		return;
+	}
+
+	if (text.isEmpty())
+	{
+		// Only surface the "Empty field" error once the user actually leaves the field still
+		// empty -- not the moment it becomes empty (e.g. right after the auto-clear-on-focus in
+		// eventFilter(), which silences this same message on purpose so it doesn't flash up
+		// before they've had a chance to type anything).
+		const QString postfix = UnitsToStr(mUnit);//Show unit in dialog label (cm, mm or inch)
+		ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + tr("Empty field."));
+		return;
+	}
+
+	QSharedPointer<MeasurementVariable> meash;
+	try
+	{
+		// Translate to internal look.
+		meash = data->getVariable<MeasurementVariable>(nameField->data(Qt::UserRole).toString());
+	}
+	catch(const VExceptionBadId &exception)
+	{
+		qCWarning(tMainWindow, "%s\n\n%s\n\n%s",
+				  qUtf8Printable(tr("Can't find measurement '%1'.").arg(nameField->text())),
+				  qUtf8Printable(exception.ErrorMessage()), qUtf8Printable(exception.DetailedInformation()));
+		return;
+	}
+
 	if (!EvalFormula(text, true, meash->GetData(), ui->labelCalculatedValue))
 	{
+		// Doesn't parse/evaluate right now, so it can't be committed to the model (that would
+		// corrupt the pattern) -- but don't just drop it either. Keep it as a draft so switching
+		// to another row and back doesn't silently replace what she typed with the last value
+		// that did save -- see ShowNewMData(), which checks this map before falling back to
+		// meash->GetFormula(). Recolor this row (problem/pink) right away rather than waiting for a
+		// full refresh, which would also undo the point of the CommitMValue/RefreshTable split.
+		m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), text);
+		SetRowHighlight(row, rowHighlightProblem);
+		return;
+	}
+
+	QString internalFormula;
+	try
+	{
+		internalFormula = qApp->translateVariables()->FormulaFromUser(text, qApp->Settings()->getOsSeparator());
+	}
+	catch (qmu::QmuParserError &error) // Just in case something bad will happen
+	{
+		Q_UNUSED(error)
+		return;
+	}
+
+	// A formula that parses and computes fine (EvalFormula() above passed) can still be wrong in
+	// a way EvalFormula() has no way to see: it may refer to a measurement that's a section
+	// divider (checkBoxIsSection), which has no real value to use -- see
+	// FormulaReferencesSection(). Catch that here too, before it's accepted as a committed
+	// result, with the same "keep as a problem draft, don't commit" treatment as an outright
+	// EvalFormula() failure above -- otherwise a formula like "Тест + Тест" (both operands the
+	// same section-divider measurement) sails through as a normal-looking committed value.
+	QString sectionRefName;
+	if (FormulaReferencesSection(internalFormula, &sectionRefName))
+	{
+		const QString postfix = UnitsToStr(mUnit);
+		const QString message = tr("This formula uses \"%1\", which is a section divider and "
+									"can't be used in calculations.").arg(sectionRefName);
+		ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+		ui->labelCalculatedValue->setToolTip(message);
+
+		m_formulaDrafts.insert(nameField->data(Qt::UserRole).toString(), text);
+		SetRowHighlight(row, rowHighlightProblem);
 		return;
 	}
 
 	try
 	{
-		const QString formula = qApp->translateVariables()->FormulaFromUser(text, qApp->Settings()->getOsSeparator());
-		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), formula);
+		individualMeasurements->SetMValue(nameField->data(Qt::UserRole).toString(), internalFormula);
+		MarkMeasurementSaved(nameField->data(Qt::UserRole).toString());
 	}
 	catch (qmu::QmuParserError &error) // Just in case something bad will happen
 	{
@@ -2040,11 +2576,56 @@ void TMainWindow::SaveMValue()
 	RefreshData();
 	m_search->refreshList(ui->find_LineEdit->text());
 
-	ui->tableWidget->blockSignals(true);
-	ui->tableWidget->selectRow(row);
-	ui->tableWidget->blockSignals(false);
+	if (restoreSelection)
+	{
+		// Find this row again by name -- RefreshData() just rebuilt the whole table, so the old
+		// row index may no longer point at the same measurement.
+		int newRow = -1;
+		for (int candidate = 0; candidate < ui->tableWidget->rowCount(); ++candidate)
+		{
+			const QTableWidgetItem *item = ui->tableWidget->item(candidate, ColumnName);
+			if (item && item->data(Qt::UserRole).toString() == measurementName)
+			{
+				newRow = candidate;
+				break;
+			}
+		}
 
-	ui->plainTextEditFormula->setTextCursor(cursor);
+		if (newRow != -1)
+		{
+			ui->tableWidget->blockSignals(true);
+			ui->tableWidget->selectRow(newRow);
+			ui->tableWidget->blockSignals(false);
+		}
+
+		ui->plainTextEditFormula->setTextCursor(cursor);
+	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Commit whatever's in the formula editor right now to the row it's currently showing.
+ * The normal path: called on FocusOut (see eventFilter()) once editing finishes, and also
+ * flushed explicitly before saving the file (FileSave()/FileSaveAs()) so Ctrl+S can never miss
+ * an edit still in progress. See CommitMValueFor() for the actual work; ShowNewMData() is the
+ * other caller, and targets a specific (possibly no-longer-current) row by name instead.
+ */
+void TMainWindow::CommitMValue()
+{
+	const int row = ui->tableWidget->currentRow();
+
+	if (row == -1)
+	{
+		return;
+	}
+
+	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
+	if (!nameField)
+	{
+		return;
+	}
+
+	CommitMValueFor(nameField->data(Qt::UserRole).toString(), true);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2193,6 +2774,37 @@ void TMainWindow::SaveMFullName()
 	{
 		qCWarning(tMainWindow, "%s", qUtf8Printable(tr("The full name of known measurement forbidden to change.")));
 	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Toggle whether the selected row is a section divider -- see checkBoxIsSection in
+ * tmainwindow.ui, MeasurementDoc::AttrIsSection, and the blue row highlight in RefreshTable().
+ * Not restricted to custom measurements (unlike SaveMFullName() above) -- there's no reason a
+ * known/library measurement couldn't also be repurposed as a divider.
+ */
+void TMainWindow::SaveMIsSection(bool checked)
+{
+	const int row = ui->tableWidget->currentRow();
+
+	if (row == -1)
+	{
+		return;
+	}
+
+	const QTableWidgetItem *nameField = ui->tableWidget->item(row, ColumnName);
+	individualMeasurements->SetMIsSection(nameField->data(Qt::UserRole).toString(), checked);
+
+	MeasurementsWasSaved(false);
+
+	RefreshData();
+	m_search->refreshList(ui->find_LineEdit->text());
+
+	ui->tableWidget->blockSignals(true);
+	ui->tableWidget->selectRow(row);
+	ui->tableWidget->blockSignals(false);
+
+	ShowNewMData(false);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2527,6 +3139,7 @@ void TMainWindow::InitWindow()
 	connect(ui->lineEditName, &QLineEdit::textEdited, this, &TMainWindow::SaveMName);
 	connect(ui->plainTextEditDescription, &QPlainTextEdit::textChanged, this, &TMainWindow::SaveMDescription);
 	connect(ui->lineEditFullName, &QLineEdit::textEdited, this, &TMainWindow::SaveMFullName);
+	connect(ui->checkBoxIsSection, &QCheckBox::toggled, this, &TMainWindow::SaveMIsSection);
 
 	connect(ui->pushButtonShowInExplorer, &QPushButton::clicked, this, [this]()
 	{
@@ -2662,6 +3275,8 @@ void TMainWindow::SetCurrentFile(const QString &fileName)
 //---------------------------------------------------------------------------------------------------------------------
 bool TMainWindow::SaveMeasurements(const QString &fileName, QString &error)
 {
+	RegisterNewKnitMeasurements();
+
 	const bool result = individualMeasurements->SaveDocument(fileName, error);
 	if (result)
 	{
@@ -2669,6 +3284,57 @@ bool TMainWindow::SaveMeasurements(const QString &fileName, QString &error)
 		MeasurementsWasSaved(result);
 	}
 	return result;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Adds every measurement in this file that isn't a built-in sewing
+/// measurement and isn't already in Марта's knitting-measurement dictionary
+/// to that dictionary, using whatever full name and description she's
+/// typed for it so far. Called right before saving, so a plain name she
+/// just created (no "@") is "known" the next time this or any other file
+/// uses it -- she never has to think about the "@" prefix at all.
+void TMainWindow::RegisterNewKnitMeasurements()
+{
+	if (individualMeasurements == nullptr || mType != MeasurementsType::Individual)
+	{
+		return;
+	}
+
+	const QStringList sewingNames = AllGroupNames();
+	const QStringList allNames = individualMeasurements->ListAll();
+
+	for (const QString &name : allNames)
+	{
+		if (name.indexOf(CustomMSign) == 0 || sewingNames.contains(name) || IsKnitMeasurement(name))
+		{
+			continue; // legacy "@" custom name, a sewing measurement, or already registered
+		}
+
+		try
+		{
+			const QSharedPointer<MeasurementVariable> meash = data->getVariable<MeasurementVariable>(name);
+			RegisterKnitMeasurement(name, meash->getGuiText(), meash->GetDescription());
+		}
+		catch (const VExceptionBadId &exception)
+		{
+			Q_UNUSED(exception)
+		}
+	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool TMainWindow::CanReplaceCurrentWindow() const
+{
+	// Safe to silently reuse this window for a different file -- no prompt, no risk of losing
+	// anything -- only when it's still showing a brand new, completely untouched file: no name
+	// on disk yet, nothing in the table. Deliberately mirrors MaybeSave()'s own "don't ask if
+	// file was created without modifications" freebie rather than checking isWindowModified()
+	// directly -- FileNew() marks a fresh file as modified immediately (it has never been saved
+	// to disk), so that flag is already true right after pressing "New" even though there is
+	// nothing here actually worth keeping. Anything else (a loaded or edited file, even one
+	// that's already fully saved) keeps the existing, safer behavior of opening a separate
+	// window instead, same as it always has.
+	return individualMeasurements != nullptr && curFile.isEmpty() && ui->tableWidget->rowCount() == 0;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2746,6 +3412,70 @@ QTableWidgetItem *TMainWindow::AddCell(const QString &text, int row, int column,
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Paint every cell in a table row with the same background color, or, with an invalid
+ * QColor, with the plain alternating-row shading a row would normally get on its own. Used for
+ * the row-level highlighting described above AddCell() -- setForeground() there colors one
+ * cell's text on a value error, this colors a whole row's background for the "has a formula" /
+ * "check this" / "unsaved draft" states instead.
+ *
+ * tableWidget's own "alternatingRowColors" property is OFF (see the .ui file) and every row's
+ * shading is applied by hand here instead, including the plain, unhighlighted rows -- on this
+ * Mac's native style, the built-in alternating shading is painted directly by the view and
+ * doesn't reliably respect a per-item Qt::BackgroundRole set below it: a "reminder" row that
+ * landed on what would have been an alternate row kept its plain alternate-row gray instead of
+ * turning orange (the warning icon still showed, since that's a separate, unaffected paint
+ * step). Painting every row's background here, always, sidesteps that rather than depending on
+ * two different systems agreeing on top of each other.
+ */
+void TMainWindow::SetRowHighlight(int row, const QColor &color)
+{
+	QBrush brush;
+	if (color.isValid())
+	{
+		brush = QBrush(color);
+	}
+	else
+	{
+		// Same odd/even shading alternatingRowColors would have given this row, taken from the
+		// palette (so it still follows the system's light/dark appearance) rather than a
+		// hard-coded gray.
+		const QPalette::ColorRole role = (row % 2 != 0) ? QPalette::AlternateBase : QPalette::Base;
+		brush = QBrush(ui->tableWidget->palette().color(role));
+	}
+
+	for (int column = 0; column < ui->tableWidget->columnCount(); ++column)
+	{
+		if (QTableWidgetItem *cellItem = ui->tableWidget->item(row, column))
+		{
+			cellItem->setBackground(brush);
+		}
+	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Update row-highlight bookkeeping after a measurement's formula was actually committed
+ * to the model (individualMeasurements->SetMValue() succeeded) -- see CommitMValue() and Fx().
+ * Anyone whose formula references this measurement's name may now compute to a different
+ * result, so their rows get flagged (reminder/orange, via m_affectedMeasurements) until she
+ * looks at them or resaves them -- see ShowNewMData() and the problem/reminder priority comment
+ * above rowHighlightBlue. This measurement's own reminder flag and any leftover invalid-formula draft are
+ * cleared, since what's now in the model is exactly what was just typed and it evaluated fine.
+ */
+void TMainWindow::MarkMeasurementSaved(const QString &name)
+{
+	const QStringList affected = m_usedByMeasurement.value(name);
+	for (const QString &affectedName : affected)
+	{
+		m_affectedMeasurements.insert(affectedName);
+	}
+
+	m_affectedMeasurements.remove(name);
+	m_formulaDrafts.remove(name);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 QComboBox *TMainWindow::SetGradationList(QLabel *label, const QStringList &list)
 {
 	ui->toolBarGradation->addWidget(label);
@@ -2800,6 +3530,20 @@ void TMainWindow::RefreshTable(bool freshCall)
 {
 	ui->tableWidget->blockSignals(true);
 	ui->tableWidget->clearContents();
+
+	// The vertical header normally stays in ResizeToContents mode so a row's height always
+	// matches its (word-wrapped) content. But that mode makes every single setItem() call below
+	// trigger its own synchronous row-height recompute -- unnoticeable on a small file, but on
+	// Марта's 150-row file (2026-09-12) that alone added several seconds to editing a single
+	// formula, and made the window unresponsive to clicks for as long as it took. Switch to
+	// Fixed for the duration of the populate loop and do one resizeRowsToContents() call after
+	// it instead -- same final row heights, one pass instead of ~900 (150 rows x ~6 columns).
+	ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+
+	// Rebuilt fresh on every refresh below (Individual/single-size files only -- see the
+	// Individual branch further down) so it always reflects the current formula text, including
+	// any reference just added or removed. See MarkMeasurementSaved() for how it's used.
+	m_usedByMeasurement.clear();
 
 	ShowUnits();
 
@@ -2858,6 +3602,124 @@ void TMainWindow::RefreshTable(bool freshCall)
 			const QString description = meash->isCustom() ? meash->GetDescription()
 												: qApp->translateVariables()->Description(meash->GetName());
 			AddCell(description, currentRow, ColumnDescription, Qt::AlignVCenter); // description
+
+			// Row highlighting: figure out which of blue/reminder/problem (if any) this row gets --
+			// see the comment above rowHighlightBlue for what each means and the priority order.
+			// A section-divider row (meash->IsSection()) is always blue and skips everything
+			// else below -- it has no real formula, so it's never a dependency of anything and
+			// never carries a draft. The internal (untranslated) formula is used for dependency
+			// extraction so the names line up with meash->GetName()/Qt::UserRole, which is what
+			// m_usedByMeasurement/m_affectedMeasurements are keyed on.
+			if (meash->IsSection())
+			{
+				SetRowHighlight(currentRow, rowHighlightBlue);
+			}
+			else
+			{
+				const QString internalFormula = meash->GetFormula();
+
+				// A formula that refers to a section-divider measurement (checkBoxIsSection) is
+				// always wrong -- a divider has no real value, it's purely organizational -- even
+				// though the Calculator itself has no trouble evaluating it (see
+				// FormulaReferencesSection()). Detected in the same usedNames pass used just
+				// below to build m_usedByMeasurement, so the formula is only parsed once.
+				bool referencesSection = false;
+				QString sectionRefName;
+
+				// Only re-parse a formula that the data layer itself already parsed
+				// successfully (meash->IsFormulaOk(), set by readMeasurements()/EvalFormula() in
+				// measurements.cpp). A formula that's currently incomplete or malformed on disk
+				// (e.g. something left mid-edit) already gets its own red error indicator further
+				// down and doesn't need to show up in anyone else's dependency list -- and asking
+				// the parser to tokenize a broken formula a second time here, for every table
+				// refresh, is worth avoiding rather than relying on this being harmless.
+				if (!internalFormula.isEmpty() && meash->IsFormulaOk())
+				{
+					try
+					{
+						QScopedPointer<Calculator> depCal(new Calculator());
+						const QStringList usedNames = depCal->GetUsedVariables(internalFormula);
+						for (const QString &usedName : usedNames)
+						{
+							m_usedByMeasurement[usedName].append(meash->GetName());
+
+							if (!referencesSection)
+							{
+								const QSharedPointer<MeasurementVariable> used = table.value(usedName);
+								if (!used.isNull() && used->IsSection())
+								{
+									referencesSection = true;
+									sectionRefName = qApp->translateVariables()->MToUser(usedName);
+								}
+							}
+						}
+					}
+					catch (qmu::QmuParserError &error)
+					{
+						// Can't even tokenize this formula right now -- nothing to record. The
+						// existing red error highlight on the calculated-value cell already
+						// flags that something is wrong with this row.
+						Q_UNUSED(error)
+					}
+					catch (...)
+					{
+						// Belt and suspenders: this is a table-refresh convenience scan, not
+						// essential to showing the row itself, so whatever this formula did to
+						// get here, it must not be allowed to take the whole table refresh (and
+						// the app) down with it.
+					}
+				}
+
+				QColor rowColor;
+				if (m_formulaDrafts.contains(meash->GetName()) || referencesSection)
+				{
+					rowColor = rowHighlightProblem;
+				}
+				else if (m_affectedMeasurements.contains(meash->GetName()))
+				{
+					rowColor = rowHighlightReminder;
+				}
+				SetRowHighlight(currentRow, rowColor);
+
+				if (referencesSection)
+				{
+					const QString message = tr("This formula uses \"%1\", which is a section "
+												"divider and can't be used in calculations.")
+												.arg(sectionRefName);
+					if (QTableWidgetItem *calcItem = ui->tableWidget->item(currentRow, ColumnCalcValue))
+					{
+						QBrush brush = calcItem->foreground();
+						brush.setColor(Qt::red);
+						calcItem->setForeground(brush);
+						calcItem->setToolTip(message);
+					}
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(currentRow, ColumnFormula))
+					{
+						formulaItem->setToolTip(message);
+					}
+				}
+				else if (rowColor == rowHighlightReminder)
+				{
+					// Orange here isn't an error -- the value is still correct -- it's a "you
+					// may want to take another look" reminder because a measurement this formula
+					// uses was just changed elsewhere. Say so explicitly (tooltip) and mark it
+					// visually (a small warning icon in front of the formula text, see
+					// ReminderRowIcon()) so a colored row doesn't read as broken. Clicking into
+					// the row clears it (see ShowNewMData()).
+					const QString message = tr("A measurement this formula uses was just changed. "
+												"Open this row to confirm the result is still what "
+												"you expect -- doing so clears this reminder.");
+					if (QTableWidgetItem *nameItem = ui->tableWidget->item(currentRow, ColumnName))
+					{
+						nameItem->setToolTip(message);
+					}
+					if (QTableWidgetItem *formulaItem = ui->tableWidget->item(currentRow, ColumnFormula))
+					{
+						formulaItem->setToolTip(message);
+						formulaItem->setIcon(ReminderRowIcon());
+					}
+				}
+			}
 		}
 		else
 		{
@@ -2893,6 +3755,13 @@ void TMainWindow::RefreshTable(bool freshCall)
 			const QString description = meash->isCustom() ? meash->GetDescription()
 												: qApp->translateVariables()->Description(meash->GetName());
 			AddCell(description, currentRow, ColumnDescription, Qt::AlignVCenter); // description
+
+			// Multisize rows don't get the reminder/problem/section highlighting above (that's
+			// Individual-file-only, see the comment near rowHighlightBlue), but they still need
+			// SOME background -- alternatingRowColors is off for this whole table now (see
+			// SetRowHighlight()), so without this every row here would come out plain instead of
+			// alternating.
+			SetRowHighlight(currentRow, QColor());
 		}
 	}
 
@@ -2907,8 +3776,14 @@ void TMainWindow::RefreshTable(bool freshCall)
 		{
 			ui->tableWidget->horizontalHeader()->resizeSection(ColumnFormula, maxFormulaColumnWidth);
 		}
-		ui->tableWidget->resizeRowsToContents();
 	}
+
+	// Restore the normal auto-sizing mode now that the table is fully populated, and size every
+	// row in one batched pass -- see the comment above the Fixed switch at the top of this
+	// function for why this is done once here instead of implicitly on every setItem() above.
+	ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+	ui->tableWidget->resizeRowsToContents();
+
 	ui->tableWidget->horizontalHeader()->setStretchLastSection(true);
 	ui->tableWidget->blockSignals(false);
 
@@ -2919,13 +3794,25 @@ void TMainWindow::RefreshTable(bool freshCall)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Generate a default name ("M_1", "M_2", ...; "М_1", "М_2", ... on a Russian-locale
+ * build) for a brand new custom measurement. Deliberately kept locale-translated -- an earlier
+ * version of this fix forced it to the untranslated Latin prefix instead, to close a real trap
+ * (a Cyrillic "М_" auto-name looks identical to a Latin "M_" typed by hand, but is a different
+ * character to the parser, producing a silent "Neozhidanny token" error) -- but that traded away
+ * matching the rest of a Russian-locale interface, which she'd rather keep. So this stays
+ * translated; the trap it reopens just means a reference to an auto-named measurement has to be
+ * typed/pasted in the same script it was created in (Cyrillic М for a Cyrillic auto-name) --
+ * using the Измерение/Функция picker to insert the reference, rather than typing it by hand,
+ * sidesteps that entirely.
+ */
 QString TMainWindow::GetCustomName() const
 {
 	qint32 num = 1;
 	QString name;
 	do
 	{
-		name = CustomMSign + qApp->translateVariables()->InternalVarToUser(measurement_) + QString().number(num);
+		name = qApp->translateVariables()->InternalVarToUser(measurement_) + QString().number(num);
 		num++;
 	} while (data->IsUnique(name) == false);
 
@@ -2994,6 +3881,7 @@ void TMainWindow::MFields(bool enabled)
 	{
 		ui->plainTextEditFormula->setEnabled(enabled);
 		ui->toolButtonExpr->setEnabled(enabled);
+		ui->checkBoxIsSection->setEnabled(enabled);
 	}
 
 	ui->find_LineEdit->setEnabled(enabled);
@@ -3130,6 +4018,48 @@ bool TMainWindow::EvalFormula(const QString &formula, bool fromUser, VContainer 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+bool TMainWindow::FormulaReferencesSection(const QString &internalFormula, QString *sectionName) const
+{
+	if (internalFormula.isEmpty())
+	{
+		return false;
+	}
+
+	try
+	{
+		QScopedPointer<Calculator> depCal(new Calculator());
+		const QStringList usedNames = depCal->GetUsedVariables(internalFormula);
+		const QMap<QString, QSharedPointer<MeasurementVariable> > table = data->DataMeasurements();
+		for (const QString &usedName : usedNames)
+		{
+			const QSharedPointer<MeasurementVariable> used = table.value(usedName);
+			if (!used.isNull() && used->IsSection())
+			{
+				if (sectionName != nullptr)
+				{
+					*sectionName = qApp->translateVariables()->MToUser(usedName);
+				}
+				return true;
+			}
+		}
+	}
+	catch (qmu::QmuParserError &error)
+	{
+		// Can't even tokenize this formula right now -- not our concern here, the existing
+		// red error highlight on the calculated-value cell already flags it.
+		Q_UNUSED(error)
+	}
+	catch (...)
+	{
+		// Belt and suspenders, same reasoning as the identical catch in RefreshTable(): this is
+		// a supplementary check, not essential to showing or committing the row, so it must not
+		// bring the app down no matter what this formula does to the parser.
+	}
+
+	return false;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void TMainWindow::Open(const QString &dir, const QString &filter)
 {
     const QString filename = fileDialog(this, tr("Open file"), dir, filter, nullptr,
@@ -3138,14 +4068,11 @@ void TMainWindow::Open(const QString &dir, const QString &filter)
 
 	if (!filename.isEmpty())
 	{
-		if (individualMeasurements == nullptr)
-		{
-			LoadFile(filename);
-		}
-		else
-		{
-			qApp->newMainWindow()->LoadFile(filename);
-		}
+		// LoadFile() already decides for itself whether it's safe to reuse this window or whether
+		// it needs to open a separate one (see CanReplaceCurrentWindow()) -- doing that same check
+		// again here, ahead of it, used to short-circuit straight to a brand new window even when
+		// this one was empty and safe to reuse.
+		LoadFile(filename);
 	}
 }
 
@@ -3170,15 +4097,29 @@ void TMainWindow::MeasurementGUI()
 {
 	if (const QTableWidgetItem *nameField = ui->tableWidget->item(ui->tableWidget->currentRow(), ColumnName))
 	{
-		const bool isCustom = !(nameField->text().indexOf(CustomMSign) == 0);
-		ui->lineEditName->setReadOnly(isCustom);
-		ui->plainTextEditDescription->setReadOnly(isCustom);
-		ui->lineEditFullName->setReadOnly(isCustom);
+		// Read-only unless we can confirm this measurement is the user's own
+		// to edit (MeasurementVariable::isCustom() -- no longer just an "@"
+		// check, see measurement_variable.cpp).
+		bool isKnown = true;
+		try
+		{
+			const QSharedPointer<MeasurementVariable> meash =
+				data->getVariable<MeasurementVariable>(nameField->data(Qt::UserRole).toString());
+			isKnown = !meash->isCustom();
+		}
+		catch (const VExceptionBadId &exception)
+		{
+			Q_UNUSED(exception)
+		}
+
+		ui->lineEditName->setReadOnly(isKnown);
+		ui->plainTextEditDescription->setReadOnly(isKnown);
+		ui->lineEditFullName->setReadOnly(isKnown);
 
 		// Need to block signals for QLineEdit in readonly mode because it still emits
 		// QLineEdit::editingFinished signal.
-		ui->lineEditName->blockSignals(isCustom);
-		ui->lineEditFullName->blockSignals(isCustom);
+		ui->lineEditName->blockSignals(isKnown);
+		ui->lineEditFullName->blockSignals(isKnown);
 
 		Controls(); // Buttons remove, up, down
 	}

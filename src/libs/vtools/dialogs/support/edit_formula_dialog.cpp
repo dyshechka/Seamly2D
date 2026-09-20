@@ -61,6 +61,7 @@
 #include <QDialog>
 #include <QFont>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
 #include <QMapIterator>
@@ -209,8 +210,13 @@ EditFormulaDialog::~EditFormulaDialog()
 //---------------------------------------------------------------------------------------------------------------------
 void EditFormulaDialog::DialogAccepted()
 {
+    // Line breaks are kept as typed rather than flattened to spaces here -- they're
+    // insignificant whitespace to the formula parser either way (see VTranslateVars::
+    // FormulaFromUser()/EvalFormula(), which already tokenize past them), so nothing about
+    // evaluating this formula later depends on flattening it now. Discarding them here used to
+    // silently erase any multi-line formatting typed into this dialog's formula field the
+    // moment OK was pressed.
     m_formula = ui->plainTextEditFormula->toPlainText();
-    m_formula.replace("\n", " ");
     emit DialogClosed(QDialog::Accepted);
     accepted();
 }
@@ -244,14 +250,38 @@ void EditFormulaDialog::valueChanged(int row)
     }
     QTableWidgetItem *item = ui->tableWidget->item( row, NameColumn );
 
+    // currentCellChanged() can fire with no actual current item -- e.g. row == -1 right after
+    // every row gets hidden by filterVariables(), or during other selection churn -- in which
+    // case tableWidget->item() returns nullptr. Every branch below dereferences item, so bail
+    // out here instead of crashing the whole application on a null pointer.
+    if (item == nullptr)
+    {
+        ui->info_Label->setText("");
+        return;
+    }
+
+    // Below, each tab looks up its variable by name and immediately dereferences the result.
+    // getVariable<T>() throws VExceptionBadId for a name it can't find or can't cast, and
+    // DataVariables()->value(name) silently returns a null QSharedPointer for the same case --
+    // neither used to be guarded here, so a name that's momentarily stale (e.g. the table just
+    // got refiltered/rebuilt out from under this signal) would either throw uncaught out of a
+    // Qt slot or crash on a null dereference. Both are real crash mechanisms, not just
+    // theoretical -- guard the whole lookup instead of trusting the row is always still valid.
+    try
+    {
     switch (ui->menuTab_ListWidget->currentRow())
     {
         case VariableTab::Measurements:
         {
             const QString name = qApp->translateVariables()->VarFromUser(item->text());
             const QSharedPointer<MeasurementVariable> measurement = data->getVariable<MeasurementVariable>(name);
+            const QSharedPointer<VInternalVariable> value = data->DataVariables()->value(name);
+            if (value.isNull())
+            {
+                break;
+            }
 
-            setInfo(item->text(), *data->DataVariables()->value(name)->GetValue(),
+            setInfo(item->text(), *value->GetValue(),
                     UnitsToStr(qApp->patternUnit(), true), tr("Measurement"),
                     description(measurement), fullName(measurement));
             break;
@@ -261,7 +291,12 @@ void EditFormulaDialog::valueChanged(int row)
             const QString name = item->text();
             const QSharedPointer<CustomVariable> variable = data->getVariable<CustomVariable>(item->text());
             const QString desc = variable->GetDescription();
-            setInfo(name, *data->DataVariables()->value(item->text())->GetValue(),
+            const QSharedPointer<VInternalVariable> value = data->DataVariables()->value(item->text());
+            if (value.isNull())
+            {
+                break;
+            }
+            setInfo(name, *value->GetValue(),
                     UnitsToStr(qApp->patternUnit(), true), tr("Custom Variable"),
                     desc, "");
             break;
@@ -306,6 +341,12 @@ void EditFormulaDialog::valueChanged(int row)
             ui->info_Label->setText(item->toolTip());
             break;
         }
+    }
+    }
+    catch (const VExceptionBadId &exception)
+    {
+        Q_UNUSED(exception)
+        ui->info_Label->setText("");
     }
     return;
 }
@@ -379,6 +420,22 @@ void EditFormulaDialog::insertVariable(const QString &rotation)
     QTableWidgetItem *item = ui->tableWidget->currentItem();
     if (item != nullptr)
     {
+        if (qApp->Settings()->autoClearFx() && ui->plainTextEditFormula->toPlainText() == m_undoFormula)
+        {
+            // Nothing has been typed since the dialog opened -- if all that's here is the
+            // placeholder zero (a brand new/custom measurement with no formula set yet),
+            // replace it outright instead of inserting into/next to it, which used to
+            // produce an invalid formula like "0acos()" with no obvious cause. Any other
+            // value already sitting here -- including one typed in before this dialog was
+            // even opened -- is left completely alone.
+            bool isDouble = false;
+            const double value = m_undoFormula.toDouble(&isDouble);
+            if (isDouble && qFuzzyIsNull(value))
+            {
+                ui->plainTextEditFormula->clear();
+            }
+        }
+
         QTextCursor cursor = ui->plainTextEditFormula->textCursor();
         if (ui->menuTab_ListWidget->currentRow() == VariableTab::Functions)
         {
@@ -545,26 +602,38 @@ void EditFormulaDialog::resizeEvent(QResizeEvent *event)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+bool EditFormulaDialog::eventFilter(QObject *object, QEvent *event)
+{
+    // DialogTool::eventFilter() (below) swallows Enter/Return entirely on every tool dialog's
+    // formula field -- fine for the short, single-line formulas those dialogs usually hold, but
+    // it meant there was no way to add a line break here at all, unlike the multi-line-capable
+    // Formula field in SeamlyMe's own window. Insert one here instead, same as pressing Enter
+    // already does in that other field, then let the base class still handle everything else
+    // (numpad decimal point translation, etc.) for this and every other tool dialog.
+    if (object == ui->plainTextEditFormula && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        if ((keyEvent->key() == Qt::Key_Enter) || (keyEvent->key() == Qt::Key_Return))
+        {
+            ui->plainTextEditFormula->insertPlainText(QStringLiteral("\n"));
+            return true;
+        }
+    }
+
+    return DialogTool::eventFilter(object, event);
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 void EditFormulaDialog::SetFormula(const QString &value)
 {
     m_formula = qApp->translateVariables()->FormulaToUser(value, qApp->Settings()->getOsSeparator());
     m_undoFormula = m_formula;
 
-    if (qApp->Settings()->autoClearFx())
-    {
-        bool isInt;
-        // Explicitly cast to void to suppress clang warnings
-        (void)m_formula.toInt(&isInt);
-
-        bool isDouble;
-        // Explicitly cast to void to suppress clang warnings
-        (void)m_formula.toDouble(&isDouble);
-
-        if(isInt || isDouble)
-        {
-            m_formula = QString();
-        }
-    }
+    // The placeholder value (typically just "0" for a brand new/custom measurement) is left
+    // visible here rather than cleared up front, so it stays there for reference while the user
+    // is still just looking through the tabs. See insertVariable(), which is where it actually
+    // gets replaced -- right when the user inserts something, which is the moment it would
+    // otherwise silently glue onto the placeholder (e.g. "0acos()").
     ui->plainTextEditFormula->setPlainText(m_formula);
     MoveCursorToEnd(ui->plainTextEditFormula);
 }
@@ -834,24 +903,45 @@ void EditFormulaDialog::showFunctions()
     ui->tableWidget->setRowCount(0);
     ui->tableWidget->setColumnHidden(NumberColumn, true);
     ui->tableWidget->setColumnHidden(NameColumn, false);
-    ui->tableWidget->setColumnHidden(DescriptionColumn, true);
+    ui->tableWidget->setColumnHidden(DescriptionColumn, false);
     ui->tableWidget->setColumnHidden(ValueColumn, true);
     ui->tableWidget->setColumnHidden(FullNameColumn, true);
     ui->info_Label->setText("");
+
+    // A function's description can run to a full sentence -- let it wrap instead of being cut
+    // off, and size each row to fit. Switching to Fixed for the loop and resizing once after
+    // (instead of leaving ResizeToContents active the whole time) avoids the per-item resize
+    // cost that turned out to be expensive on SeamlyMe's own, much larger measurements table --
+    // see TMainWindow::RefreshTable(). Harmless either way on this short list, but no reason not
+    // to do it the same, cheaper way.
+    ui->tableWidget->setWordWrap(true);
+    ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
 
     QMap<QString, qmu::QmuTranslation>::const_iterator i = qApp->translateVariables()->getFunctions().constBegin();
     while (i != qApp->translateVariables()->getFunctions().constEnd())
     {
         ui->tableWidget->setRowCount(ui->tableWidget->rowCount() + 1);
+        const QString description = i.value().getMdisambiguation();
+
         QTableWidgetItem *item = new QTableWidgetItem(i.value().translate());
+        item->setToolTip(description);
         ui->tableWidget->setItem(ui->tableWidget->rowCount()-1, NameColumn, item);
-        item->setToolTip(i.value().getMdisambiguation());
+
+        QTableWidgetItem *descItem = new QTableWidgetItem(description);
+        descItem->setToolTip(description);
+        descItem->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        ui->tableWidget->setItem(ui->tableWidget->rowCount()-1, DescriptionColumn, descItem);
+
         ++i;
     }
+
+    ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    ui->tableWidget->resizeRowsToContents();
 
     ui->tableWidget->blockSignals(false);
     ui->tableWidget->selectRow(0);
     ui->tableWidget->resizeColumnsToContents();
+    ui->tableWidget->horizontalHeader()->setSectionResizeMode(DescriptionColumn, QHeaderView::Stretch);
     ui->tableWidget->horizontalHeader()->setStretchLastSection(false);
 }
 

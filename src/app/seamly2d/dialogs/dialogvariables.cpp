@@ -371,6 +371,15 @@ void DialogVariables::addCell(QTableWidget *table, const QString &text, int row,
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Generate a default name for a brand new custom increment/variable ("Переменная_1" on
+ * a Russian-locale build). Deliberately kept locale-translated to match the rest of a
+ * Russian-locale interface -- see the longer comment on the equivalent
+ * TMainWindow::GetCustomName() in SeamlyMe for the trade-off this involves (a locale-translated
+ * auto-name can contain characters that look identical to, but don't match, what's typed by
+ * hand in a different script -- avoid that by inserting the reference via a picker rather than
+ * typing it, when the auto-name wasn't renamed to something ASCII).
+ */
 QString DialogVariables::getCustomVariableName() const
 {
     qint32 num = 1;

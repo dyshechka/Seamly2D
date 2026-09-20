@@ -112,6 +112,7 @@ GraphicsViewZoom::GraphicsViewZoom(QGraphicsView* view)
     , verticalOffset(0.0)
     , scaleFactor(0.0)
     , currentScaleFactor(0.0)
+    , m_pinchInProgress(false)
 {
     m_view->viewport()->installEventFilter(this);
 
@@ -291,6 +292,17 @@ bool GraphicsViewZoom::eventFilter(QObject *object, QEvent *event)
         }
         else
         {
+            // A real-world two-finger pinch rarely has zero drift -- the slight incidental
+            // motion often also arrives here as a wheel event alongside the pinch gesture
+            // itself (see pinchTriggered()/m_pinchInProgress). Starting a scroll animation
+            // from that drift would fight the pinch's own zoom (they'd both be adjusting the
+            // view at once) and can make the zoom look like it isn't working, so ignore wheel
+            // input entirely while a pinch is active.
+            if (m_pinchInProgress)
+            {
+                return true;
+            }
+
             // A trackpad reports a genuine two-axis swipe (pixelDelta/angleDelta both
             // populated) -- pick whichever axis carries the dominant motion so a left-right
             // swipe scrolls horizontally on its own, without needing Shift. Shift still forces
@@ -358,10 +370,22 @@ void GraphicsViewZoom::panTriggered(QPanGesture *gesture)
 
 void GraphicsViewZoom::pinchTriggered(QPinchGesture *gesture)
 {
+    // See m_pinchInProgress: while true, the wheel-event handler in eventFilter() ignores
+    // incidental drift instead of scrolling, so it doesn't fight this gesture's own zoom.
+    m_pinchInProgress = (gesture->state() == Qt::GestureStarted || gesture->state() == Qt::GestureUpdated);
+
     QPinchGesture::ChangeFlags flags = gesture->changeFlags();
     if (flags & QPinchGesture::ScaleFactorChanged)
     {
-        qreal currentScaleFactor = gesture->lastScaleFactor();
+        // gesture->scaleFactor() is the incremental change since the *previous* gesture
+        // update -- exactly what gentleZoom() expects to multiply into the current view scale
+        // on every call. gesture->lastScaleFactor() is one step older (the increment that was
+        // current *before* this update), so using it here fed gentleZoom() stale data: when the
+        // pinch speeds up or slows down between two trackpad events -- which it constantly does
+        // in real use -- the zoom applied this frame no longer matches how far the fingers
+        // actually moved this frame, so it visibly over- or undershoots. See:
+        // https://doc.qt.io/qt-5/qpinchgesture.html#scaleFactor-prop
+        qreal currentScaleFactor = gesture->scaleFactor();
         gentleZoom(currentScaleFactor);
     }
 }
@@ -527,17 +551,36 @@ bool VMainGraphicsView::showMillimeterGrid() const
 //---------------------------------------------------------------------------------------------------------------------
 namespace
 {
-    // "Nice" grid steps, in millimeters, following the classic 1-2-5 ruler/CAD progression --
-    // this keeps the visible step at a round, easy-to-read number (never something like 3 mm or
-    // 70 mm) at any zoom level. Every 3rd entry is exactly x10 the one 3 back (0.5->5, 1->10,
-    // 2->20, ...), which is what lets the medium/coarse levels below be picked with a fixed
-    // index offset instead of hunting for the next "nice" multiple by hand.
-    static const qreal millimeterGridSteps[] =
+    struct MillimeterGridLevel
     {
-        0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0
+        qreal stepMm;
+        int   alpha; // 0-255 -- increases with coarseness so overlapping levels stay distinct.
     };
-    static const int millimeterGridStepCount =
-        static_cast<int>(sizeof(millimeterGridSteps) / sizeof(millimeterGridSteps[0]));
+
+    // Ten fixed real-world steps, finest first -- Марта's chosen list, a fixed, predictable set
+    // rather than the original version's open-ended zoom-adaptive ladder. Each level is
+    // independently skipped once it's zoomed out past minGridSpacingPx below (an unreadable
+    // smudge) -- so however many of these ten currently clear that bar is exactly how many draw;
+    // there's no separate "pick 3" step. Going up to 1000 mm (1 m), not stopping at 1 cm or 5 cm,
+    // matters at the view's own zoomed-out floor (VMainGraphicsView::MinScale(), currently 18%):
+    // 1 cm was only barely above the smudge cutoff there (about 6.8px of the 6px minimum), so on
+    // real hardware it could disappear entirely; 1000 mm clears it with a wide margin (about
+    // 680px), so the grid never goes fully blank at maximum zoom-out. See DrawMillimeterGrid().
+    static const MillimeterGridLevel millimeterGridLevels[] =
+    {
+        {1.0,    25},  // 1 mm
+        {2.0,    40},  // 2 mm
+        {5.0,    55},  // 5 mm
+        {10.0,   70},  // 1 cm
+        {20.0,   90},  // 2 cm
+        {50.0,  110},  // 5 cm
+        {100.0, 130},  // 10 cm
+        {200.0, 150},  // 20 cm
+        {500.0, 170},  // 50 cm
+        {1000.0, 190}, // 1 m
+    };
+    static const int millimeterGridLevelCount =
+        static_cast<int>(sizeof(millimeterGridLevels) / sizeof(millimeterGridLevels[0]));
 
     // Below this on-screen spacing (in device-independent pixels) a level is considered too
     // dense to read -- drawing it anyway is exactly the "solid grey smudge" the spec warns about.
@@ -559,14 +602,13 @@ void VMainGraphicsView::drawBackground(QPainter *painter, const QRectF &rect)
 
 //---------------------------------------------------------------------------------------------------------------------
 /**
- * @brief DrawMillimeterGrid draws the adaptive, multi-level "millimetrovka" background grid:
- * a fine 1 mm level, a medium level 10x coarser, and a bold level 100x coarser, all drawn in
- * real-world millimeters regardless of the pattern's display unit (mm/cm/inch). Which of the
- * ladder's "nice" steps plays which role is picked fresh on every repaint from the view's
- * current zoom (transform().m11()), so zooming out smoothly walks the base step up the ladder
- * and hides the levels that would otherwise merge into an unreadable blur, exactly as the spec
- * asks for -- there is no separate zoom-tracking needed, since drawBackground() is already
- * re-invoked on every repaint and repaints already follow signalZoomScaleChanged().
+ * @brief DrawMillimeterGrid draws the "millimetrovka" background grid at its six fixed
+ * real-world steps (millimeterGridLevels above), in real-world millimeters regardless of the
+ * pattern's display unit (mm/cm/inch). Each level is skipped on its own once zoomed out far
+ * enough that it would draw closer than minGridSpacingPx apart (an unreadable smudge),
+ * independently of the other levels -- there is no separate zoom-tracking needed, since
+ * drawBackground() is already re-invoked on every repaint and repaints already follow
+ * signalZoomScaleChanged().
  */
 void VMainGraphicsView::DrawMillimeterGrid(QPainter *painter, const QRectF &rect) const
 {
@@ -586,32 +628,38 @@ void VMainGraphicsView::DrawMillimeterGrid(QPainter *painter, const QRectF &rect
         return;
     }
 
-    int fineIndex = millimeterGridStepCount - 1;
-    for (int i = 0; i < millimeterGridStepCount; ++i)
-    {
-        if (millimeterGridSteps[i] * pixelsPerMm >= minGridSpacingPx)
-        {
-            fineIndex = i;
-            break;
-        }
-    }
-
-    const int mediumIndex = qMin(fineIndex + 3, millimeterGridStepCount - 1); // ~x10 the fine step
-    const int coarseIndex = qMin(fineIndex + 6, millimeterGridStepCount - 1); // ~x100 the fine step
-
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, false);
+
+    // Antialiasing ON for the grid, even though that softens each line slightly instead of a
+    // razor-crisp single device pixel. The real-world step sizes essentially never land on a
+    // whole number of device pixels at an arbitrary zoom percentage (e.g. 123%) -- with
+    // antialiasing off, each line's on/off pixel snapping rounds independently, so the visual
+    // gap between neighboring lines alternates between whatever pixel counts are nearby instead
+    // of staying constant, which is what actually made the grid look uneven across a wide zoom
+    // range (not just one particular percentage) even after fixing the double-painted-line issue
+    // below. With antialiasing on, a line at a fractional device position is drawn as smooth
+    // partial coverage instead of snapping unevenly, so spacing reads as uniform again.
+    painter->setRenderHint(QPainter::Antialiasing, true);
 
     // Steel-blue, echoing the classic "миллиметровка" graph-paper look and the app's own blue
-    // accent color -- increasing opacity from the finest to the boldest level.
-    DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[fineIndex] * mmToScene, QColor(70, 130, 180, 40));
-    if (mediumIndex != fineIndex)
+    // accent color -- increasing opacity from the finest to the boldest level. Drawn coarsest
+    // first, finest last, and each level skips any line position that a coarser (already drawn
+    // this frame) level already covers -- e.g. the origin, or any other round-number coordinate,
+    // is a multiple of several step sizes at once, so without this a position like that gets
+    // painted several times over and the stacked semi-transparent ink makes that one line look
+    // much bolder than its neighbors (reported as an uneven-looking grid, e.g. at 123% zoom).
+    qreal drawnStepsScene[millimeterGridLevelCount];
+    int drawnStepsCount = 0;
+
+    for (int i = millimeterGridLevelCount - 1; i >= 0; --i)
     {
-        DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[mediumIndex] * mmToScene, QColor(70, 130, 180, 90));
-    }
-    if (coarseIndex != mediumIndex)
-    {
-        DrawMillimeterGridLevel(painter, rect, millimeterGridSteps[coarseIndex] * mmToScene, QColor(70, 130, 180, 150));
+        const MillimeterGridLevel &level = millimeterGridLevels[i];
+        if (level.stepMm * pixelsPerMm >= minGridSpacingPx)
+        {
+            DrawMillimeterGridLevel(painter, rect, level.stepMm * mmToScene, drawnStepsScene,
+                                     drawnStepsCount, QColor(70, 130, 180, level.alpha));
+            drawnStepsScene[drawnStepsCount++] = level.stepMm * mmToScene;
+        }
     }
 
     painter->restore();
@@ -624,6 +672,7 @@ void VMainGraphicsView::DrawMillimeterGrid(QPainter *painter, const QRectF &rect
  * call for performance (this runs on every repaint, including continuous zoom/pan).
  */
 void VMainGraphicsView::DrawMillimeterGridLevel(QPainter *painter, const QRectF &rect, qreal stepScene,
+                                                 const qreal *excludeStepsScene, int excludeStepsCount,
                                                  const QColor &color) const
 {
     if (stepScene <= 0)
@@ -638,14 +687,43 @@ void VMainGraphicsView::DrawMillimeterGridLevel(QPainter *painter, const QRectF 
     const qreal left = qFloor(rect.left() / stepScene) * stepScene;
     const qreal top = qFloor(rect.top() / stepScene) * stepScene;
 
+    // A position built as an exact multiple of stepScene (as every x/y below is, by
+    // construction) is also a multiple of a coarser, already-drawn step exactly when their
+    // ratio rounds to a whole number -- comparing via division/qRound() instead of fmod() avoids
+    // needing <cmath> here and is exact enough for this: these are the same handful of fixed
+    // millimeter steps every time, not arbitrary user input.
+    const auto alreadyDrawn = [excludeStepsScene, excludeStepsCount](qreal pos) -> bool
+    {
+        for (int i = 0; i < excludeStepsCount; ++i)
+        {
+            const qreal exclStep = excludeStepsScene[i];
+            if (exclStep <= 0)
+            {
+                continue;
+            }
+            const qreal ratio = pos / exclStep;
+            if (qAbs(ratio - qRound(ratio)) < 1e-6)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
     QVarLengthArray<QLineF, 256> lines;
     for (qreal x = left; x < rect.right(); x += stepScene)
     {
-        lines.append(QLineF(x, rect.top(), x, rect.bottom()));
+        if (!alreadyDrawn(x))
+        {
+            lines.append(QLineF(x, rect.top(), x, rect.bottom()));
+        }
     }
     for (qreal y = top; y < rect.bottom(); y += stepScene)
     {
-        lines.append(QLineF(rect.left(), y, rect.right(), y));
+        if (!alreadyDrawn(y))
+        {
+            lines.append(QLineF(rect.left(), y, rect.right(), y));
+        }
     }
 
     painter->drawLines(lines.constData(), lines.size());

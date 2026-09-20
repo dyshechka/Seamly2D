@@ -77,6 +77,7 @@
 #include "../vpatterndb/variables/measurement_variable.h"
 #include "../vpatterndb/vcontainer.h"
 #include "../vpatterndb/measurements_def.h"
+#include "../vpatterndb/knit_measurements.h"
 #include "../vpatterndb/pmsystems.h"
 #include "../vmisc/projectversion.h"
 
@@ -105,6 +106,7 @@ const QString MeasurementDoc::AttrHeightIncrease  = QStringLiteral("height_incre
 const QString MeasurementDoc::AttrDescription     = QStringLiteral("description");
 const QString MeasurementDoc::AttrName            = QStringLiteral("name");
 const QString MeasurementDoc::AttrFullName        = QStringLiteral("full_name");
+const QString MeasurementDoc::AttrIsSection       = QStringLiteral("isSection");
 
 const QString MeasurementDoc::GenderMale          = QStringLiteral("male");
 const QString MeasurementDoc::GenderFemale        = QStringLiteral("female");
@@ -317,6 +319,23 @@ void MeasurementDoc::readMeasurements() const
             Q_UNUSED(error)
         }
 
+        // Files normally don't repeat a knitting measurement's full name and
+        // description (that's the point of the dictionary) -- fill them in
+        // here so every display path shows the same text regardless of
+        // whether this measurement counts as "custom". An explicit value
+        // already in the file always wins.
+        if (IsKnitMeasurement(name))
+        {
+            if (fullName.isEmpty())
+            {
+                fullName = KnitFullName(name);
+            }
+            if (description.isEmpty())
+            {
+                description = KnitDescription(name);
+            }
+        }
+
         QSharedPointer<MeasurementVariable> meash;
         QSharedPointer<MeasurementVariable> tempMeash;
         if (type == MeasurementsType::Multisize)
@@ -350,12 +369,28 @@ void MeasurementDoc::readMeasurements() const
             bool ok = false;
             qreal value = EvalFormula(tempData.data(), formula, &ok);
 
-            tempMeash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(tempData.data(), static_cast<quint32>(i), name,
-                                                                      value, formula, ok, fullName, description));
+            // Section-divider rows (see AttrIsSection/TMainWindow::checkBoxIsSection) are purely
+            // organizational -- absent on older files, which is exactly "not a section" (false).
+            const bool isSection = getParameterBool(dom, AttrIsSection, falseStr);
 
-            value = UnitConvertor(value, measurementUnits(), *data->GetPatternUnit());
+            if (isSection)
+            {
+                // A divider has no real value to hold, so force it to an obviously-wrong
+                // sentinel instead of leaving whatever its formula/value happened to be before
+                // it was turned into a divider (which could easily look like a plausible real
+                // number). This is a last-resort floor: TMainWindow::FormulaReferencesSection()
+                // is what actually stops a formula from using a divider, but if one ever slips
+                // through anyway, -100000 is impossible to mistake for a legitimate result.
+                value = -100000;
+            }
+
+            tempMeash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(tempData.data(), static_cast<quint32>(i), name,
+                                                                      value, formula, ok, fullName, description, QString(),
+                                                                      isSection));
+
+            value = isSection ? -100000 : UnitConvertor(value, measurementUnits(), *data->GetPatternUnit());
             meash = QSharedPointer<MeasurementVariable>(new MeasurementVariable(data, static_cast<quint32>(i), name, value, formula,
-                                                                  ok, fullName, description));
+                                                                  ok, fullName, description, QString(), isSection));
         }
         tempData->AddVariable(name, tempMeash);
         data->AddVariable(name, meash);
@@ -647,6 +682,20 @@ void MeasurementDoc::SetMFullName(const QString &name, const QString &text)
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+void MeasurementDoc::SetMIsSection(const QString &name, bool value)
+{
+    QDomElement node = FindM(name);
+    if (not node.isNull())
+    {
+        SetAttribute<bool>(node, AttrIsSection, value);
+    }
+    else
+    {
+        qWarning() << tr("Can't find measurement '%1'").arg(name);
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 QString MeasurementDoc::GenderToStr(const GenderType &sex)
 {
     switch (sex)
@@ -714,7 +763,7 @@ QStringList MeasurementDoc::listKnown() const
 //---------------------------------------------------------------------------------------------------------------------
 bool MeasurementDoc::eachKnownNameIsValid() const
 {
-    QStringList names = AllGroupNames();
+    QStringList names = AllGroupNames() + AllKnitGroupNames();
 
     QSet<QString> set;
     foreach (const QString &var, names)
