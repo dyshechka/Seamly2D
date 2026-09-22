@@ -1302,6 +1302,7 @@
     <addaction name="actionOpenMultisize"/>
     <addaction name="actionOpenTemplate"/>
     <addaction name="actionCreateFromExisting"/>
+    <addaction name="actionConvert"/>
     <addaction name="separator"/>
     <addaction name="import_Menu"/>
     <addaction name="separator"/>
@@ -1365,6 +1366,7 @@
    </attribute>
    <addaction name="actionNew"/>
    <addaction name="actionOpenIndividual"/>
+   <addaction name="actionConvert"/>
    <addaction name="print_Action"/>
    <addaction name="actionSave"/>
    <addaction name="actionSaveAs"/>
@@ -1528,6 +1530,21 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+O</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionConvert">
+   <property name="icon">
+    <iconset resource="../../libs/vmisc/share/resources/icon.qrc">
+     <normaloff>:/icon/24x24/left_to_right_arrow.png</normaloff>:/icon/24x24/left_to_right_arrow.png</iconset>
+   </property>
+   <property name="text">
+    <string notr="true">Сконвертировать...</string>
+   </property>
+   <property name="toolTip">
+    <string notr="true">Преобразовать файл мерок старого формата (с "@" и старой функцией rint) в текущий формат</string>
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>

@@ -170,6 +170,8 @@ public:
     QStringList          listKnown() const;
 
     bool                 eachKnownNameIsValid() const;
+    QString              FirstUnknownName() const;
+    void                 RegisterUnknownKnitMeasurements() const;
 
     VContainer          *GetData() const;
 

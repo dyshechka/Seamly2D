@@ -77,6 +77,7 @@
 #include "../vtools/dialogs/support/edit_formula_dialog.h"
 #include "version.h"
 #include "../vformat/measurements.h"
+#include "../vformat/measurements_old_format_converter.h"
 #include "application_me.h" // Should be last because of definning qApp
 
 #include <QClipboard>
@@ -442,9 +443,17 @@ bool TMainWindow::LoadFile(const QString &path)
                 filename.replace(QLatin1String(".vit"), QLatin1String(".smis"));
 			}
 
+			// See MeasurementDoc::RegisterUnknownKnitMeasurements() -- makes a plain (no "@")
+			// measurement name that's never been through this dictionary before (an older file, one
+			// from another machine) register instead of being rejected outright by the check below.
+			individualMeasurements->RegisterUnknownKnitMeasurements();
+
 			if (!individualMeasurements->eachKnownNameIsValid())
 			{
-				VException e(tr("File contains invalid known measurement(s)."));
+				const QString badName = individualMeasurements->FirstUnknownName();
+				VException e(badName.isEmpty()
+					? tr("File contains invalid known measurement(s).")
+					: tr("File contains an invalid measurement: \"%1\".").arg(badName));
 				throw e;
 			}
 
@@ -667,6 +676,81 @@ void TMainWindow::CreateFromExisting()
 		QDir directory(dir);
 		directory.rmpath(".");
 	}
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Converts an old-format measurements file (mandatory "@" + old rint() syntax, see
+/// tz_slovar_merok and OldFormatMeasurementsConverter) into a new file in the current format.
+/// Never overwrites the source file -- always asks for a separate output file. Doesn't touch
+/// individualMeasurements/the currently open document; this is a standalone file-to-file
+/// conversion, independent of whatever is currently loaded in this window.
+void TMainWindow::ConvertOldFormat()
+{
+	const QString openFilter = tr("Individual measurements") + QLatin1String(" (*.") + smisExt +
+	                                                           QLatin1String(" *.") + vitExt + QLatin1String(");;") +
+	                           tr("All files") + QLatin1String(" (*.*)");
+
+	const QString openDir = qApp->seamlyMeSettings()->getIndividualSizePath();
+
+	const QString sourcePath = fileDialog(this, tr("Select an old-format measurements file"), openDir, openFilter,
+	                                      nullptr, qApp->seamlyMeSettings()->getUseNativeFileDialogs(),
+	                                      QFileDialog::ExistingFile, QFileDialog::AcceptOpen);
+	if (sourcePath.isEmpty())
+	{
+		return;
+	}
+
+	const QFileInfo sourceInfo(sourcePath);
+	QString suffix = sourceInfo.suffix();
+	if (suffix.compare(smisExt, Qt::CaseInsensitive) != 0 && suffix.compare(vitExt, Qt::CaseInsensitive) != 0)
+	{
+		suffix = smisExt;
+	}
+
+	const QString suggestedName = sourceInfo.completeBaseName() + QStringLiteral(" — конвертировано.") + suffix;
+	const QString saveFilter = tr("Individual measurements") + QLatin1String(" (*.") + smisExt +
+	                                                           QLatin1String(" *.") + vitExt + QLatin1String(")");
+
+	const QString destPath = fileDialog(this, tr("Save converted file as"),
+	                                    sourceInfo.absolutePath() + QLatin1String("/") + suggestedName,
+	                                    saveFilter, nullptr, qApp->seamlyMeSettings()->getUseNativeFileDialogs(),
+	                                    QFileDialog::AnyFile, QFileDialog::AcceptSave);
+	if (destPath.isEmpty())
+	{
+		return;
+	}
+
+	if (QFileInfo(destPath) == QFileInfo(sourcePath))
+	{
+		QMessageBox::warning(this, tr("Convert"),
+		                      QStringLiteral("Файл результата должен отличаться от исходного. Конвертация не выполнена."));
+		return;
+	}
+
+	const OldFormatMeasurementsConverter::Report report = OldFormatMeasurementsConverter::Convert(sourcePath, destPath);
+
+	if (!report.errorMessage.isEmpty())
+	{
+		QMessageBox::critical(this, tr("Convert"), report.errorMessage);
+		return;
+	}
+
+	QString summary = QStringLiteral("Файл сохранён:\n%1\n\n"
+	                                  "Переименовано мерок (убран/свёрнут \"@\"): %2\n"
+	                                  "Формул с обновлённой функцией rint(): %3")
+	                      .arg(destPath).arg(report.renamedCount).arg(report.rintConvertedCount);
+
+	if (!report.collisionWarnings.isEmpty())
+	{
+		summary += QStringLiteral("\n\n") +
+		           QStringLiteral("Предупреждения (%1):").arg(report.collisionWarnings.size());
+		for (const QString &warning : report.collisionWarnings)
+		{
+			summary += QStringLiteral("\n") + warning;
+		}
+	}
+
+	QMessageBox::information(this, tr("Convert"), summary);
 }
 
 /*
@@ -2824,6 +2908,7 @@ void TMainWindow::SetupMenu()
 	connect(ui->actionOpenMultisize, &QAction::triggered, this, &TMainWindow::OpenMultisize);
 	connect(ui->actionOpenTemplate, &QAction::triggered, this, &TMainWindow::OpenTemplate);
 	connect(ui->actionCreateFromExisting, &QAction::triggered, this, &TMainWindow::CreateFromExisting);
+	connect(ui->actionConvert, &QAction::triggered, this, &TMainWindow::ConvertOldFormat);
 
     //connect(ui->bodyScanner1_Action, &QAction::triggered, this, &TMainWindow::handleBodyScanner1);
 	connect(ui->bodyScanner2_Action, &QAction::triggered, this, &TMainWindow::handleBodyScanner2);
@@ -4239,9 +4324,17 @@ bool TMainWindow::LoadFromExistingFile(const QString &path)
 				individualMeasurements->setXMLContent(converter.Convert());// Read again after conversion
 			}
 
+			// See MeasurementDoc::RegisterUnknownKnitMeasurements() -- makes a plain (no "@")
+			// measurement name that's never been through this dictionary before (an older file, one
+			// from another machine) register instead of being rejected outright by the check below.
+			individualMeasurements->RegisterUnknownKnitMeasurements();
+
 			if (!individualMeasurements->eachKnownNameIsValid())
 			{
-				VException e(tr("File contains invalid known measurement(s)."));
+				const QString badName = individualMeasurements->FirstUnknownName();
+				VException e(badName.isEmpty()
+					? tr("File contains invalid known measurement(s).")
+					: tr("File contains an invalid measurement: \"%1\".").arg(badName));
 				throw e;
 			}
 
