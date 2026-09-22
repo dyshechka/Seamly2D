@@ -784,6 +784,76 @@ bool MeasurementDoc::eachKnownNameIsValid() const
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+/// @brief Returns the name (the "name" attribute, not the human-readable full_name) of the first
+/// known (non-"@") measurement in this file that eachKnownNameIsValid() would reject, or an empty
+/// string if every known name is valid. Lets callers report *which* measurement is the problem
+/// instead of the generic "file contains invalid measurement(s)" message.
+QString MeasurementDoc::FirstUnknownName() const
+{
+    QStringList names = AllGroupNames() + AllKnitGroupNames();
+
+    QSet<QString> set;
+    foreach (const QString &var, names)
+    {
+        set.insert(var);
+    }
+
+    names = listKnown();
+    foreach (const QString &var, names)
+    {
+        if (not set.contains(var))
+        {
+            return var;
+        }
+    }
+
+    return QString();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Adds every "known" (non-"@") measurement name in this file that isn't a built-in
+/// sewing measurement and isn't already in the local knitting-measurement dictionary to that
+/// dictionary, using this file's own full_name/description text for it.
+///
+/// This is the open-time counterpart to TMainWindow::RegisterNewKnitMeasurements() (which does
+/// the same job but only runs when *saving*, reading full_name/description off the already-built
+/// VContainer). This one reads straight off the file's own XML, so it works before the file has
+/// been loaded into a container -- specifically, right before eachKnownNameIsValid() is checked
+/// on open. Without it, a plain (no "@") measurement name that was never saved through this exact
+/// dictionary before -- an older file, one authored on another machine, one typed by hand -- would
+/// make eachKnownNameIsValid() reject the file outright, with no way to open it and save it once to
+/// register the name normally. That defeats the point of dropping the "@" requirement (see
+/// tz_slovar_merok): a plain custom measurement name is supposed to just work, the first time it's
+/// seen, whether that's on save or on open.
+void MeasurementDoc::RegisterUnknownKnitMeasurements() const
+{
+    if (type != MeasurementsType::Individual)
+    {
+        return; // the knitting dictionary is scoped to individual measurement files (tz_slovar_merok)
+    }
+
+    const QStringList sewingNames = AllGroupNames();
+    const QDomNodeList list = elementsByTagName(TagMeasurement);
+
+    for (int i = 0; i < list.size(); ++i)
+    {
+        const QDomElement dom = list.at(i).toElement();
+        if (dom.isNull())
+        {
+            continue;
+        }
+
+        const QString name = dom.attribute(AttrName);
+        if (name.isEmpty() || name.indexOf(CustomMSign) == 0 || sewingNames.contains(name) || IsKnitMeasurement(name))
+        {
+            continue; // empty, "@"-custom, a sewing measurement, or already registered
+        }
+
+        RegisterKnitMeasurement(name, dom.attribute(AttrFullName), dom.attribute(AttrDescription));
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 VContainer *MeasurementDoc::GetData() const
 {
     return data;

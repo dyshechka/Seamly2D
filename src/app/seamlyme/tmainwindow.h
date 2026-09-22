@@ -115,6 +115,7 @@ private slots:
     void                OpenMultisize();
     void                OpenTemplate();
     void                CreateFromExisting();
+    void                ConvertOldFormat();
     //void                handleBodyScanner1();
     void                handleBodyScanner2();
     void                Preferences();
