@@ -12,7 +12,8 @@
 
 knitIT — форк проекта [Seamly2D](https://github.com/FashionFreedom/Seamly2D), переработанный под задачи вязания на машине. Базовая часть — геометрическое ядро, движок формул, система мерок и построения — унаследована от Seamly2D и адаптируется под новую предметную область.
 
-Распространяется под лицензией GPLv3+, как и исходный проект — см. раздел "Лицензия" ниже. Будет доступна для Windows, macOS и Linux.
+Распространяется под лицензией GPLv3+, как и исходный проект — см. раздел "Лицензия" ниже. 
+Будет доступна для Windows, macOS и Linux.
 
 ### Что делает программа
 
@@ -66,7 +67,8 @@ Open-source software for building patterns for knitwear made on a knitting machi
 
 knitIT is a fork of [Seamly2D](https://github.com/FashionFreedom/Seamly2D), adapted for machine knitting. The underlying core — the geometry engine, the formula engine, the measurement and construction system — is inherited from Seamly2D and is being adapted to the new domain.
 
-Released under the GPLv3+ license, same as the original project — see "License" below. Will be available for Windows, macOS, and Linux.
+Released under the GPLv3+ license, same as the original project — see "License" below. 
+Will be available for Windows, macOS, and Linux.
 
 ### What it does
 
