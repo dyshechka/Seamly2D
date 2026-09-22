@@ -1,3 +1,5 @@
+Need to update for knitIT
+
 # Contributing code
 
 Thanks for contributing to Seamly code, documentation, translations, website, and wiki!
