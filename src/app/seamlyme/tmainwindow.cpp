@@ -80,6 +80,7 @@
 #include "../vformat/measurements_old_format_converter.h"
 #include "application_me.h" // Should be last because of definning qApp
 
+#include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -1917,6 +1918,16 @@ void TMainWindow::AddCustom()
 	ui->actionExportToCSV->setEnabled(true);
 
 	MeasurementsWasSaved(false);
+
+	// Selecting the new row above repaints the Formula field (see ShowNewMData()) with the
+	// new, still-empty measurement's placeholder formula, but doesn't itself move keyboard
+	// focus -- so if she'd been typing in that field a moment ago, it silently kept focus and
+	// her very next keystroke would land back in it instead of nowhere, as expected after
+	// adding a row. Clear whatever field still has focus (Formula or otherwise) explicitly.
+	if (QWidget *focusedWidget = QApplication::focusWidget())
+	{
+		focusedWidget->clearFocus();
+	}
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -2245,6 +2256,34 @@ void TMainWindow::ShowNewMData(bool fresh)
 				if (hasDraft)
 				{
 					EvalFormula(draftFormula, true, meash->GetData(), ui->labelCalculatedValue);
+
+					// Same section-divider check as the "no draft" branch below -- and just as
+					// necessary here, arguably more so: this draft only exists because committing
+					// it was already refused for exactly this reason (see CommitMValueFor()), so
+					// coming back to this row must show the same error again, not a plausible-
+					// looking number with no explanation. The draft is in as-typed (user-facing)
+					// form, so translate it the same way CommitMValueFor() does before checking.
+					QString sectionRefName;
+					QString internalDraftFormula;
+					try
+					{
+						internalDraftFormula = qApp->translateVariables()->FormulaFromUser(draftFormula,
+																							qApp->Settings()->getOsSeparator());
+					}
+					catch (qmu::QmuParserError &error)
+					{
+						Q_UNUSED(error)
+					}
+
+					if (!internalDraftFormula.isEmpty() && FormulaReferencesSection(internalDraftFormula, &sectionRefName))
+					{
+						const QString postfix = UnitsToStr(pUnit);
+						const QString message = tr("This formula uses \"%1\", which is a section "
+													"divider and can't be used in calculations.")
+													.arg(sectionRefName);
+						ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+						ui->labelCalculatedValue->setToolTip(message);
+					}
 				}
 				else
 				{
@@ -2519,6 +2558,32 @@ void TMainWindow::SaveMValue()
 	// Just refresh the live preview label -- EvalFormula() only evaluates this one formula,
 	// it does not touch the rest of the table, so this stays cheap even on a big file.
 	EvalFormula(text, true, meash->GetData(), ui->labelCalculatedValue);
+
+	// Same section-divider check as CommitMValueFor()/ShowNewMData() -- EvalFormula() above
+	// only catches parser failures and infinite/NaN results, not a formula that refers to a
+	// section divider (checkBoxIsSection), which parses and computes just fine on its own.
+	// Without this, typing a reference to a divider showed a normal-looking live value right up
+	// until she left the field, when CommitMValueFor() finally refused it -- she'd only find out
+	// something was wrong after the fact instead of as she typed it.
+	QString internalFormula;
+	try
+	{
+		internalFormula = qApp->translateVariables()->FormulaFromUser(text, qApp->Settings()->getOsSeparator());
+	}
+	catch (qmu::QmuParserError &error)
+	{
+		Q_UNUSED(error)
+	}
+
+	QString sectionRefName;
+	if (!internalFormula.isEmpty() && FormulaReferencesSection(internalFormula, &sectionRefName))
+	{
+		const QString postfix = UnitsToStr(mUnit);
+		const QString message = tr("This formula uses \"%1\", which is a section divider and "
+									"can't be used in calculations.").arg(sectionRefName);
+		ui->labelCalculatedValue->setText(tr("Error") + " (" + postfix + "). " + message);
+		ui->labelCalculatedValue->setToolTip(message);
+	}
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -3880,16 +3945,16 @@ void TMainWindow::RefreshTable(bool freshCall)
 
 //---------------------------------------------------------------------------------------------------------------------
 /**
- * @brief Generate a default name ("M_1", "M_2", ...; "М_1", "М_2", ... on a Russian-locale
- * build) for a brand new custom measurement. Deliberately kept locale-translated -- an earlier
- * version of this fix forced it to the untranslated Latin prefix instead, to close a real trap
- * (a Cyrillic "М_" auto-name looks identical to a Latin "M_" typed by hand, but is a different
- * character to the parser, producing a silent "Neozhidanny token" error) -- but that traded away
- * matching the rest of a Russian-locale interface, which she'd rather keep. So this stays
- * translated; the trap it reopens just means a reference to an auto-named measurement has to be
- * typed/pasted in the same script it was created in (Cyrillic М for a Cyrillic auto-name) --
- * using the Измерение/Функция picker to insert the reference, rather than typing it by hand,
- * sidesteps that entirely.
+ * @brief Generate a default name ("M_1", "M_2", ...) for a brand new custom measurement.
+ * Always the untranslated Latin prefix, regardless of interface locale -- a previous version of
+ * this used the locale-translated prefix instead (Cyrillic "М_" on a Russian-locale build), but
+ * that opened a real trap: a Cyrillic "М_1" auto-name looks identical to a Latin "M_1" typed by
+ * hand, yet is a different character to the parser, so a formula referencing it by hand-typed
+ * name failed with a silent "Neozhidanny token" error, and a name typed into a new file could
+ * even collide-by-appearance with an auto-name from another file/locale without either of them
+ * noticing (see the bug she found: a formula quietly evaluating against the wrong "M_1"). Always
+ * Latin closes that trap for good, at the cost of the auto-name no longer matching the rest of a
+ * Russian-locale interface -- she's decided that trade is worth it.
  */
 QString TMainWindow::GetCustomName() const
 {
@@ -3897,7 +3962,7 @@ QString TMainWindow::GetCustomName() const
 	QString name;
 	do
 	{
-		name = qApp->translateVariables()->InternalVarToUser(measurement_) + QString().number(num);
+		name = measurement_ + QString().number(num);
 		num++;
 	} while (data->IsUnique(name) == false);
 
