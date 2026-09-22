@@ -58,7 +58,7 @@ only when the session is linked to her computer, through the
   safety check, or `cat > file << 'EOF'` for new files) — never by
   re-typing a whole file's content from a prior tool result, which may be
   truncated.
-- Git remotes: `origin` = `https://github.com/dyshechka/Seamly2D.git`
+- Git remotes: `origin` = `https://github.com/dyshechka/knitIT.git` (repo renamed on GitHub; the URL is case-insensitive so `knitIT` works the same)
   (Марта's/family's fork — push branches here), `upstream` =
   `https://github.com/FashionFreedom/Seamly2D.git` (the original project,
   read-only reference — don't push here).
