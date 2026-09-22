@@ -1,62 +1,113 @@
-![Seamly2D banner](../share/img/Seamly2D_banner_1202x271.png)
+![knitIT banner](../share/img/knitIT_banner_1402x588.png)
 
------
+# knitIT
 
+🇷🇺 [Русский](#русский) · 🇬🇧 [English](#english)
 
+---
 
+## Русский
 
-[![GitHub release (latest)](https://img.shields.io/github/v/release/fashionfreedom/seamly2d?logo=github?color=blue&style=flat-square)](https://github.com/FashionFreedom/Seamly2D/releases/latest)
-[![GitHub weekly build](https://img.shields.io/github/actions/workflow/status/fashionfreedom/seamly2d/ci.yml?logo=github&style=flat-square)](https://github.com/FashionFreedom/Seamly2D/actions/workflows/ci.yml)
-[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/fashionfreedom/seamly2d?logo=github&color=brightgreen&style=flat-square)](https://github.com/FashionFreedom/Seamly2D/graphs/commit-activity)
-[![GitHub contributors](https://img.shields.io/github/contributors/fashionfreedom/seamly2d?style=flat-square&logo=github)](https://github.com/FashionFreedom/Seamly2D/graphs/contributors)
-[![GitHub](https://img.shields.io/github/license/fashionfreedom/seamly2d?color=blue&style=flat-square&logo=creativecommons)](../LICENSE)
-[![Translate](https://hosted.weblate.org/widget/seamly/seamly2d/svg-badge.svg)](https://hosted.weblate.org/engage/seamly/)
-[![Website](https://img.shields.io/website?down_message=Down&style=flat-square&up_color=brightgreen&up_message=Up&url=https%3A%2F%2Fseamly.io&logo=wordpress)](https://seamly.io/)
-[![Forum posts](https://img.shields.io/discourse/posts?server=https%3A%2F%2Fforum.seamly.io&style=flat-square&logo=discourse)](https://forum.seamly.io/)  
-[![Qt](https://sourceforge.net/p/seamly2d/wiki/_discuss/thread/65e38fbf32/a54b/attachment/Built_with_Qt_RGB_logo_vertical_transparent_60x65px.png)](https://qt.io)  
+Программа с открытым исходным кодом для построения выкроек трикотажных изделий, созданных на вязальных машинах.
 
-Click here -->[![GitHub Stars](https://img.shields.io/github/stars/fashionfreedom/seamly2d?style=social)](https://github.com/fashionfreedom/seamly2d)<-- to star Seamly2D.
+knitIT — форк проекта [Seamly2D](https://github.com/FashionFreedom/Seamly2D), переработанный под задачи вязания на машине. Базовая часть — геометрическое ядро, движок формул, система мерок и построения — унаследована от Seamly2D и адаптируется под новую предметную область.
 
+Распространяется под лицензией GPLv3+, как и исходный проект — см. раздел "Лицензия" ниже. Будет доступна для Windows, macOS и Linux.
 
+### Что делает программа
 
-<big>Seamly2D</big> is open source patternmaking software to democratize fashion, released under the GPLv3+ license, and available for Windows, MacOS, and Linux.
+Позволяет:
+- вести файл мерок и вводных данных модели (в knitME);
+- строить выкройку трикотажного изделия по формулам, привязанным к меркам;
+- получать готовую схему/выкройку для вязания на машине.
 
-Design what **you** want to wear. Each Seamly2D pattern can read multi-size measurement files for standardized sizes *and* read individual measurement files for custom-fit.
-Don't know how? Join our multi-lingual Discourse [forum](https://forum.seamly.io).
+### Статус проекта
 
-### Supported platforms:
-   * Windows 10 & 11 (64-bit) 
-   * macOS Ventura (13), Sonoma (14), Sequoia (15), Tahoe (26)
-   * Most current Linux distros as Flatpak via [Flathub](https://flathub.org/apps/io.seamly.seamly2d)
-   * Most current Linux distros as AppImage
-___________________________________________________
-### Download:
+knitIT находится в стадии адаптации. Основная часть работы уже сделана в knitME (редакторе мерок, наследнике SeamlyMe): добавлен собственный словарь вязальных мерок, переработан интерфейс редактирования мерок и формул, добавлена подсветка строк с проблемными или зависимыми значениями, конвертер файлов мерок старого формата и другие улучшения. В самом knitIT (построение и раскладка выкройки) тоже появились первые изменения — например, миллиметровая сетка на холсте и доработки в движке формул, — но основная логика построения выкройки пока остаётся такой же, как в исходном швейном проекте, и её адаптация под вязание ещё впереди. Подробности — во внутренней документации проекта (`CLAUDE.md` и техзадания в папке разработки).
 
-| Windows 64-bit | Windows ARM64 | MacOS | Linux AppImage | Linux Flatpak |
-| :---:          | :---:         | :---: | :---:          | :---:         |
-| [![Seamly2D-windows.zip](./img/Microsoft_logo-60x60px.png)](https://github.com/FashionFreedom/Seamly2D/releases/latest/download/Seamly2D-windows.zip) | [![Seamly2D-win-arm64.zip](./img/Microsoft_logo-60x60px.png)](https://github.com/FashionFreedom/Seamly2D/releases/latest/download/Seamly2D-win-arm64.zip) | [![Seamly2D-macos.zip](./img/MacOS_logo_60x60.png)](https://github.com/FashionFreedom/Seamly2D/releases/latest/download/Seamly2D-macos.zip) | [![Seamly2D AppImage](./img/linux-svgrepo-com-60x71.png)](https://github.com/FashionFreedom/Seamly2D/releases/latest/download/Seamly2D-x86_64.AppImage) | [![Seamly2D Flatpak](./img/flathub-badge-en.png)](https://flathub.org/apps/io.seamly.seamly2d) |
-| Intel or AMD 64bit | ARM 64bit | Apple Silicon or Intel | Intel or AMD 64bit | Intel or AMD 64bit |
-| Windows 10<br>Windows 11 | Windows 11 | macOS 13 Ventura<br>macOS 14 Sonoma<br>macOS 15 Sequoia<br>macOS Tahoe 26 | Debian 12+ (bookworm or later)<br>Ubuntu 22.04+ (jammy or later)<br>ArchLinux<br>Manjaro | Everywhere, where flathub is supported|
+### Поддерживаемые платформы
 
-___________________________________________________
-### Community :
-   * [Website and downloads](https://seamly.io) - _active, current_
-   * [User Forum](https://forum.seamly.io/) - _active, current_
-   * [User Wiki Manual](https://wiki.seamly.io) - _needs updating_
-___________________________________________________
+- Windows 10 и 11 (64-бит)
+- macOS Ventura (13), Sonoma (14), Sequoia (15), Tahoe (26)
+- Большинство актуальных дистрибутивов Linux (Flatpak, AppImage)
 
-### Developer :
-   * [Developer README](README-DEVELOPER.md) - _current_
-   * [Developer Wiki](https://github.com/FashionFreedom/Seamly2D/wiki) - _needs updating_
-   * [Doxygen docs](https://fashionfreedom.github.io/Seamly2D/) - _current_
-___________________________________________________
-### LICENSING
+### Скачать
 
-![GPLv3](./img/GPLv3_Logo-121x60px.png)
+_Раздел будет заполнен после того, как для knitIT появится собственная сборка и отдельный репозиторий/релизы — сейчас ссылки на готовые файлы для скачивания вести некуда, публиковать старые ссылки на Seamly2D было бы неверно, так как там нет функциональности для вязания._
 
-See [https://www.gnu.org/licenses/gpl-3.0.html](https://www.gnu.org/licenses/gpl-3.0.html) for more information.
+### Сообщество
 
-Other components and licensing:
-* QMuParser - [Simplified BSD license](https://opensource.org/licenses/BSD-2-Clause)
-* VPropertyExplorer - [LGPLv2.1 license](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html)
-* xerces-c - [Apache License, Version 2.0](https://apache.org/licenses/LICENSE-2.0)
+_Раздел будет заполнен, когда появится собственное место для общения пользователей knitIT (форум, чат, вики). Ссылки на форум/вики исходного проекта Seamly2D сюда сознательно не перенесены — это сообщество швейного приложения, не вязального._
+
+### Для разработчиков
+
+- Внутренняя документация по разработке — см. `CLAUDE.md` в корне репозитория.
+
+### Лицензия
+
+knitIT распространяется под лицензией GPLv3+, как и исходный проект Seamly2D, от которого он унаследован. 
+Подробнее: <https://www.gnu.org/licenses/gpl-3.0.html>
+
+Прочие компоненты и их лицензии (сверено с заголовками файлов и файлами лицензий в текущем репозитории `dyshechka/knitIT`, ветка `develop`):
+
+- QMuParser — [MIT license](https://opensource.org/licenses/MIT) — в README исходного проекта Seamly2D эта лицензия ошибочно указана как "Simplified BSD license"; в самих исходниках (заголовки `qmuparserbase.cpp`, `qmuparser.cpp` и других файлов папки) — текст именно MIT.
+- VPropertyExplorer — [LGPLv2.1 license](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html) — подтверждено заголовком `vproperty.cpp`.
+- xerces-c — [Apache License, Version 2.0](https://apache.org/licenses/LICENSE-2.0) — подтверждено файлом `src/libs/xerces-c/LICENSE`.
+
+Основано на проекте [Seamly2D](https://github.com/FashionFreedom/Seamly2D) — программе для построения швейных выкроек, также распространяемой под GPLv3+.
+
+[⬆ к переключателю языков](#knitit)
+
+---
+
+## English
+
+Open-source software for building patterns for knitwear made on a knitting machine.
+
+knitIT is a fork of [Seamly2D](https://github.com/FashionFreedom/Seamly2D), adapted for machine knitting. The underlying core — the geometry engine, the formula engine, the measurement and construction system — is inherited from Seamly2D and is being adapted to the new domain.
+
+Released under the GPLv3+ license, same as the original project — see "License" below. Will be available for Windows, macOS, and Linux.
+
+### What it does
+
+Lets you:
+- maintain a file of a model's measurements and input parameters (in knitME);
+- build a knitwear pattern from formulas tied to measurements and/or gauge;
+- get a finished pattern/schematic ready for knitting on a machine.
+
+### Project status
+
+knitIT is mid-adaptation. Most of the work so far has gone into knitME (the measurement editor, knitIT's counterpart to SeamlyMe): a dedicated knitting-measurement dictionary, a reworked measurement/formula editing interface, row highlighting for problem or dependent values, an old-format file converter, and other improvements. knitIT itself (pattern construction and layout) has also started to see changes — for example, a millimeter grid on the canvas and formula-engine fixes — but the core pattern-construction logic is still the same as in the original sewing project, and adapting it for knitting is still ahead. Details live in the project's internal documentation (`CLAUDE.md` and the task specs in the development folder).
+
+### Supported platforms
+
+- Windows 10 & 11 (64-bit)
+- macOS Ventura (13), Sonoma (14), Sequoia (15), Tahoe (26)
+- Most current Linux distros (Flatpak, AppImage)
+
+### Download
+
+_This section will be filled in once knitIT has its own build and a separate repository/releases — there's currently nowhere to point download links, and publishing the old Seamly2D links would be misleading, since those don't include any knitting functionality._
+
+### Community
+
+_This section will be filled in once knitIT has its own place for users to gather (forum, chat, wiki). Links to the original Seamly2D project's forum and wiki were deliberately not carried over here — that's the sewing application's community, not the knitting one._
+
+### For developers
+
+- Internal development documentation — see `CLAUDE.md` at the repository root.
+
+### License
+
+knitIT is released under the GPLv3+ license, same as the original Seamly2D project it's inherited from. 
+More info: <https://www.gnu.org/licenses/gpl-3.0.html>
+
+Other components and their licenses (verified against the file headers and license files in the current `dyshechka/knitIT` repository, `develop` branch):
+
+- QMuParser — [MIT license](https://opensource.org/licenses/MIT) — the original Seamly2D README mislabels this as "Simplified BSD license"; the actual source headers (`qmuparserbase.cpp`, `qmuparser.cpp`, and others in that folder) carry MIT license text.
+- VPropertyExplorer — [LGPLv2.1 license](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html) — confirmed by the `vproperty.cpp` header.
+- xerces-c — [Apache License, Version 2.0](https://apache.org/licenses/LICENSE-2.0) — confirmed by the `src/libs/xerces-c/LICENSE` file.
+
+Based on [Seamly2D](https://github.com/FashionFreedom/Seamly2D) — a sewing-pattern-making application, also released under the GPLv3+ license.
+
+[⬆ back to language switcher](#knitit)
