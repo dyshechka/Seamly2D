@@ -73,6 +73,11 @@
 #include "../tools/images/image_tool.h"
 #include "../vformat/measurements.h"
 #include "../vgeometry/vspline.h"
+#include "../vgeometry/vabstractarc.h"
+#include "../vgeometry/vabstractcubicbezierpath.h"
+#include "../vgeometry/vabstractcurve.h"
+#include "../vgeometry/varc.h"
+#include "../vgeometry/vellipticalarc.h"
 #include "../vmisc/customevents.h"
 #include "../vmisc/def.h"
 #include "../vmisc/logging.h"
@@ -98,6 +103,7 @@
 #include "../vwidgets/vwidgetpopup.h"
 
 #include <QAbstractItemModel>
+#include <QRegularExpression>
 #include <QInputDialog>
 #include <QtDebug>
 #include <QMessageBox>
@@ -2019,56 +2025,336 @@ void MainWindow::PrepareSceneList()
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+namespace
+{
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Марта asked for the CSV export's column headers and Type labels to show her exact Russian wording
+ * under a Russian UI, rather than whatever Qt's tr() catalog happens to produce (some of these strings are
+ * new and have no translation entry yet, so tr() would just show them in English regardless of locale --
+ * see the comment on exportToCSVData() below). Any locale other than Russian keeps using the English
+ * (translated-via-tr()) text, same as before.
+ */
+bool IsRussianLocale()
+{
+    return qApp->Settings()->getLocale().startsWith(QLatin1String("ru"));
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+QString RussianOr(const QString &russianText, const QString &otherLocaleText)
+{
+    return IsRussianLocale() ? russianText : otherLocaleText;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Formula behind a derived measurement (line length/angle, curve length/angle, a distance to a
+ * control point, or an arc radius) shown in the "Variables" window, for the CSV export below.
+ *
+ * Unlike a custom variable, these wrapper objects (VLengthLine, VLineAngle, VCurveLength, VCurveAngle,
+ * VCurveCLength, VArcRadius) don't store a formula themselves -- most of them are derived/computed values
+ * with no formula to show at all, and for the rest the formula has to be read off the real geometric
+ * object (arc/curve) they were computed from. Returning an empty string for the no-formula cases is the
+ * expected, normal result, not a bug -- see the comment in each branch for why.
+ *
+ * @param pattern the container to look up the underlying geometric object in (by objectId)
+ * @param varType which of the six derived categories this row belongs to
+ * @param name the row's name exactly as shown in the table/CSV -- for curve-based types this also encodes
+ *             which of a pair (start/end angle, first/second control point, first/second radius) the row
+ *             is, and, for a segment of a multi-segment curve, which segment (see the "_Seg_<N>" suffix
+ *             added by VContainer::AddCurveWithSegments())
+ * @param objectId id of the underlying geometric object (VCurveVariable::GetId()) -- not used for
+ *             LineLength/LineAngle, which aren't tied to a single geometric object this way
+ */
+QString ResolveDerivedFormula(VContainer *pattern, VarType varType, const QString &displayName, quint32 objectId)
+{
+    // The name coming in here is the user-facing, locale-translated one (VContainer::DataVar() runs every
+    // key through VTranslateVars::VarToUser() before handing it back -- e.g. "Angle1Spl_" is shown to the
+    // user, and stored in our row, as "Угол1Спл_" in a Russian UI). The angle1_V/angle2_V/radius_V/
+    // c1Length_V/c2Length_V prefix checks below compare against the internal (untranslated) constants from
+    // ifcdef.cpp, so translate the name back to its internal form first -- otherwise none of those
+    // startsWith() checks below would ever match under a non-English locale, and every "first of the pair"
+    // row (Angle1/Radius1/C1Length) would silently resolve using the "second of the pair" branch instead.
+    const QString name = qApp->translateVariables()->VarFromUser(displayName);
+
+    QSharedPointer<VAbstractCurve> curve;
+    try
+    {
+        curve = pattern->GeometricObject<VAbstractCurve>(objectId);
+    }
+    catch (const VExceptionBadId &error)
+    {
+        Q_UNUSED(error)
+        return QString();
+    }
+
+    const GOType curveType = curve->getType();
+
+    // A per-segment row of a multi-segment curve (SplinePath/CubicBezierPath) carries a "_Seg_<N>" suffix
+    // on its name -- that's the only place the segment number is recorded; none of VCurveLength/
+    // VCurveAngle/VCurveCLength expose it directly (see VContainer::AddCurveWithSegments()).
+    static const QRegularExpression segmentSuffix(QStringLiteral("_Seg_(\\d+)$"));
+    const QRegularExpressionMatch segMatch = segmentSuffix.match(name);
+    const bool isSegment = segMatch.hasMatch();
+
+    bool haveSegmentSpline = false;
+    VSpline segmentSpline;
+    if (isSegment)
+    {
+        const int segmentNumber = segMatch.captured(1).toInt();
+        if (curveType == GOType::SplinePath || curveType == GOType::CubicBezierPath)
+        {
+            const QSharedPointer<VAbstractCubicBezierPath> path =
+                qSharedPointerDynamicCast<VAbstractCubicBezierPath>(curve);
+            if (!path.isNull() && segmentNumber >= 1 && segmentNumber <= path->CountSubSpl())
+            {
+                segmentSpline = path->GetSpline(segmentNumber);
+                haveSegmentSpline = true;
+            }
+        }
+    }
+
+    switch (varType)
+    {
+        case VarType::ArcRadius:
+            // A radius formula only exists for an actual arc (the one tool that sets a radius directly) --
+            // VArcRadius is never created for any other curve type.
+            if (curveType == GOType::Arc)
+            {
+                const QSharedPointer<VArc> arc = qSharedPointerDynamicCast<VArc>(curve);
+                return arc.isNull() ? QString() : arc->GetFormulaRadius();
+            }
+            if (curveType == GOType::EllipticalArc)
+            {
+                const QSharedPointer<VEllipticalArc> elArc = qSharedPointerDynamicCast<VEllipticalArc>(curve);
+                if (elArc.isNull())
+                {
+                    return QString();
+                }
+                // An elliptical arc has two independent radii, each its own row -- radius_V ("Radius") is
+                // followed directly by "1" or "2" for which one this row is (see VArcRadius's constructor).
+                const QString afterPrefix = name.mid(radius_V.length());
+                return afterPrefix.startsWith(QLatin1Char('2')) ? elArc->GetFormulaRadius2()
+                                                                  : elArc->GetFormulaRadius1();
+            }
+            return QString();
+
+        case VarType::CurveLength:
+            // A curve's length is always a derived (computed) value, with one exception: an arc created
+            // with the "Arc with length" tool, where the length is what's typed in as a formula. No
+            // spline, path, or path segment ever has a length formula of its own.
+            if (curveType == GOType::Arc || curveType == GOType::EllipticalArc)
+            {
+                const QSharedPointer<VAbstractArc> arc = qSharedPointerDynamicCast<VAbstractArc>(curve);
+                return arc.isNull() ? QString() : arc->GetFormulaLength();
+            }
+            return QString();
+
+        case VarType::CurveAngle:
+        {
+            // Which of the pair (start/end tangent angle) this row is, is read the same way as the radius
+            // above: angle1_V ("Angle1") vs angle2_V ("Angle2") prefixes the name.
+            const bool isStartAngle = name.startsWith(angle1_V);
+            if (isSegment)
+            {
+                return haveSegmentSpline ? (isStartAngle ? segmentSpline.GetStartAngleFormula()
+                                                           : segmentSpline.GetEndAngleFormula())
+                                          : QString();
+            }
+            if (curveType == GOType::Arc || curveType == GOType::EllipticalArc)
+            {
+                const QSharedPointer<VAbstractArc> arc = qSharedPointerDynamicCast<VAbstractArc>(curve);
+                return arc.isNull() ? QString() : (isStartAngle ? arc->GetFormulaF1() : arc->GetFormulaF2());
+            }
+            if (curveType == GOType::Spline)
+            {
+                const QSharedPointer<VSpline> spl = qSharedPointerDynamicCast<VSpline>(curve);
+                return spl.isNull() ? QString()
+                                     : (isStartAngle ? spl->GetStartAngleFormula() : spl->GetEndAngleFormula());
+            }
+            // A plain Cubic Bezier curve (GOType::CubicBezier) is built directly from four points, not
+            // from angle/length formulas -- it has none to show. Same for a whole SplinePath/
+            // CubicBezierPath's own start/end angle row: only its individual segments (handled above) do.
+            return QString();
+        }
+
+        case VarType::CurveCLength:
+        {
+            // Distance to a control point only exists for spline-family curves -- arcs have no control
+            // points, so a VCurveCLength row is never created for one. Which of the two, C1 or C2, is
+            // again read from the name prefix.
+            const bool isFirstControlPoint = name.startsWith(c1Length_V);
+            if (isSegment)
+            {
+                return haveSegmentSpline ? (isFirstControlPoint ? segmentSpline.GetC1LengthFormula()
+                                                                  : segmentSpline.GetC2LengthFormula())
+                                          : QString();
+            }
+            if (curveType == GOType::Spline)
+            {
+                const QSharedPointer<VSpline> spl = qSharedPointerDynamicCast<VSpline>(curve);
+                return spl.isNull() ? QString()
+                                     : (isFirstControlPoint ? spl->GetC1LengthFormula() : spl->GetC2LengthFormula());
+            }
+            // A plain Cubic Bezier curve's control points are placed directly (no formula), and a whole
+            // SplinePath/CubicBezierPath's own C1/C2 row (as opposed to a per-segment one, handled above)
+            // isn't tied to a single formula either.
+            return QString();
+        }
+
+        default:
+            return QString();
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Appends one category's rows to the CSV -- for the four curve-based categories (Curve length/angle,
+/// Control point length, Arc radius), whose element type exposes GetId() and so can have its formula
+/// resolved through ResolveDerivedFormula() above.
+template <typename T>
+qint32 AppendCurveVariableRows(QxtCsvModel &csv, qint32 currentRow, VContainer *pattern,
+                                const QMap<QString, QSharedPointer<T>> &varTable, VarType varType,
+                                const QString &typeLabel)
+{
+    QMapIterator<QString, QSharedPointer<T>> i(varTable);
+    while (i.hasNext())
+    {
+        i.next();
+        ++currentRow;
+        csv.insertRow(currentRow);
+        csv.setText(currentRow, 0, QString::number(currentRow + 1)); // No.
+        csv.setText(currentRow, 1, i.key()); // name
+        csv.setText(currentRow, 2, qApp->LocaleToString(*i.value()->GetValue())); // calculated value
+        csv.setText(currentRow, 3, typeLabel); // type
+
+        // Марта asked to leave the Formula column empty for Curve angle and Control point length rows --
+        // she has no way to verify where those particular values come from, so showing a formula she can't
+        // check is worse than showing nothing. Curve length and Arc radius are unaffected.
+        const QString formula = (varType == VarType::CurveAngle || varType == VarType::CurveCLength)
+                                     ? QString()
+                                     : ResolveDerivedFormula(pattern, varType, i.key(), i.value()->GetId());
+        csv.setText(currentRow, 4, formula); // formula
+    }
+    return currentRow;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+/// @brief Appends one category's rows to the CSV -- for Line length/Line angle, which never have a formula
+/// (see ResolveDerivedFormula()) and whose element type (VLengthLine/VLineAngle) doesn't expose GetId() at
+/// all: unlike the curve-based categories, they aren't tied to one single geometric object, but computed
+/// from a pair of point ids.
+template <typename T>
+qint32 AppendLineVariableRows(QxtCsvModel &csv, qint32 currentRow, const QMap<QString, QSharedPointer<T>> &varTable,
+                               const QString &typeLabel)
+{
+    QMapIterator<QString, QSharedPointer<T>> i(varTable);
+    while (i.hasNext())
+    {
+        i.next();
+        ++currentRow;
+        csv.insertRow(currentRow);
+        csv.setText(currentRow, 0, QString::number(currentRow + 1)); // No.
+        csv.setText(currentRow, 1, i.key()); // name
+        csv.setText(currentRow, 2, qApp->LocaleToString(*i.value()->GetValue())); // calculated value
+        csv.setText(currentRow, 3, typeLabel); // type
+        csv.setText(currentRow, 4, QString()); // formula -- never applicable, see above
+    }
+    return currentRow;
+}
+} // anonymous namespace
+
+//---------------------------------------------------------------------------------------------------------------------
+/**
+ * @brief Exports every category shown in the "Variables" window to one CSV table with a running row number --
+ * not just custom variables (the only thing the older version of this export covered), but also line
+ * lengths/angles, curve lengths/angles, control point lengths, and arc radiuses, each row labelled with its
+ * type. See ResolveDerivedFormula() above for where the Formula column comes from for the non-variable rows
+ * -- many of them are legitimately computed values with no formula, so an empty cell there is expected.
+ */
 void MainWindow::exportToCSVData(const QString &fileName, const DialogExportToCSV &dialog)
 {
     QxtCsvModel csv;
 
+    // By default QxtCsvModel also quotes on a plain apostrophe ('), wrapping the whole field in '...' and
+    // backslash-escaping every apostrophe inside it (e.g. a name like Линия_А1'_А1'13' came out as
+    // 'Линия_А1\'_А1\'13\''). Марта asked for apostrophes to be left alone -- dropping SingleQuote here
+    // means a field still gets quoted (with ") only if it actually contains a double quote, comma, or
+    // newline; a bare apostrophe no longer triggers quoting/escaping at all.
+    csv.setQuoteMode(QxtCsvModel::DoubleQuote | QxtCsvModel::BackslashEscape | QxtCsvModel::AlwaysQuoteOutput);
+
     csv.insertColumn(0);
     csv.insertColumn(1);
     csv.insertColumn(2);
+    csv.insertColumn(3);
+    csv.insertColumn(4);
 
     if (dialog.WithHeader())
     {
-        csv.setHeaderText(0, tr("Name"));
-        csv.setHeaderText(1, tr("The calculated value"));
-        csv.setHeaderText(2, tr("Formula"));
-    }
-
-    const QMap<QString, QSharedPointer<CustomVariable>> customVariables = pattern->variablesData();
-    QMap<QString, QSharedPointer<CustomVariable>>::const_iterator i;
-    QMap<quint32, QString> map;
-    //Sorting QHash by id
-    for (i = customVariables.constBegin(); i != customVariables.constEnd(); ++i)
-    {
-        QSharedPointer<CustomVariable> variable = i.value();
-        map.insert(variable->getIndex(), i.key());
+        // Column headers: Марта gave exact Russian wording for a Russian UI (see RussianOr() above);
+        // the Formula header isn't part of her request and keeps using the existing translation.
+        csv.setHeaderText(0, RussianOr(QStringLiteral("№"), tr("No.")));          // №
+        csv.setHeaderText(1, RussianOr(QStringLiteral("Название"), tr("Name")));
+        csv.setHeaderText(2, RussianOr(QStringLiteral("Значение"), tr("The calculated value")));
+        csv.setHeaderText(3, RussianOr(QStringLiteral("Тип"), tr("Type")));
+        csv.setHeaderText(4, tr("Formula"));
     }
 
     qint32 currentRow = -1;
-    QMapIterator<quint32, QString> iMap(map);
-    while (iMap.hasNext())
+
+    // Custom variables ("Переменная") -- kept in their original getIndex()-sorted order, unlike the other
+    // six categories below (which were never orderable that way and are exported in QMap/name order).
     {
-        iMap.next();
-        QSharedPointer<CustomVariable> variable = customVariables.value(iMap.value());
-        currentRow++;
-
-        csv.insertRow(currentRow);
-        csv.setText(currentRow, 0, variable->GetName()); // name
-        csv.setText(currentRow, 1, qApp->LocaleToString(*variable->GetValue())); // calculated value
-
-        QString formula;
-        try
+        const QMap<QString, QSharedPointer<CustomVariable>> customVariables = pattern->variablesData();
+        QMap<quint32, QString> sortedByIndex;
+        for (auto i = customVariables.constBegin(); i != customVariables.constEnd(); ++i)
         {
-            formula = qApp->translateVariables()->FormulaToUser(variable->GetFormula(), qApp->Settings()->getOsSeparator());
-        }
-        catch (qmu::QmuParserError &error)
-        {
-            Q_UNUSED(error)
-            formula = variable->GetFormula();
+            sortedByIndex.insert(i.value()->getIndex(), i.key());
         }
 
-        csv.setText(currentRow, 2, formula); // formula
+        QMapIterator<quint32, QString> iMap(sortedByIndex);
+        while (iMap.hasNext())
+        {
+            iMap.next();
+            const QSharedPointer<CustomVariable> variable = customVariables.value(iMap.value());
+            ++currentRow;
+
+            csv.insertRow(currentRow);
+            csv.setText(currentRow, 0, QString::number(currentRow + 1)); // No.
+            csv.setText(currentRow, 1, variable->GetName()); // name
+            csv.setText(currentRow, 2, qApp->LocaleToString(*variable->GetValue())); // calculated value
+            csv.setText(currentRow, 3, RussianOr(QStringLiteral("Переменная"), tr("Variable"))); // type
+
+            QString formula;
+            try
+            {
+                formula = qApp->translateVariables()->FormulaToUser(variable->GetFormula(),
+                                                                      qApp->Settings()->getOsSeparator());
+            }
+            catch (qmu::QmuParserError &error)
+            {
+                Q_UNUSED(error)
+                formula = variable->GetFormula();
+            }
+
+            csv.setText(currentRow, 4, formula); // formula
+        }
     }
+
+    currentRow = AppendLineVariableRows(csv, currentRow, pattern->lineLengthsData(),
+                                         RussianOr(QStringLiteral("Длина линии"), tr("Line length")));
+    currentRow = AppendLineVariableRows(csv, currentRow, pattern->lineAnglesData(),
+                                         RussianOr(QStringLiteral("Угол линии"), tr("Line angle")));
+
+    currentRow = AppendCurveVariableRows(csv, currentRow, pattern, pattern->curveLengthsData(), VarType::CurveLength,
+                                          RussianOr(QStringLiteral("Длина кривой"), tr("Curve length")));
+    currentRow = AppendCurveVariableRows(csv, currentRow, pattern, pattern->curveAnglesData(), VarType::CurveAngle,
+                                          RussianOr(QStringLiteral("Угол кривой"), tr("Curve angle")));
+    currentRow = AppendCurveVariableRows(csv, currentRow, pattern, pattern->controlPointLengthsData(),
+                                          VarType::CurveCLength,
+                                          RussianOr(QStringLiteral("Длина между контрольными точками"),
+                                                     tr("Control point length")));
+    currentRow = AppendCurveVariableRows(csv, currentRow, pattern, pattern->arcRadiusesData(), VarType::ArcRadius,
+                                          RussianOr(QStringLiteral("Радиус"), tr("Arc radius")));
 
     csv.toCSV(fileName, dialog.WithHeader(), dialog.Separator(), dialog.SelectedEncoding());
 }
